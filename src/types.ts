@@ -40,6 +40,22 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  // Skill API keys
+  GOOGLE_PLACES_API_KEY?: string; // GoPlaces skill
+  AUTH_TOKEN?: string; // Bird skill (Twitter)
+  CT0?: string; // Bird skill (Twitter)
+  GH_TOKEN?: string; // GitHub skill
+  NIA_API_KEY?: string; // Nia skill
+  IMGBB_API_KEY?: string; // ImgBB uploads
+  OBSIDIAN_API_URL?: string; // Obsidian skill
+  OBSIDIAN_API_KEY?: string; // Obsidian skill
+  BW_EMAIL?: string; // Bitwarden skill
+  BW_PASSWORD?: string; // Bitwarden skill
+  // Summarize skill (optional - uses ANTHROPIC_API_KEY by default)
+  GEMINI_API_KEY?: string; // Google Gemini for summarize
+  OPENROUTER_API_KEY?: string; // OpenRouter free models for summarize
+  // WhatsApp skill (wacli) - session stored in R2, restored via /api/admin/wacli/restore
+  // Upload session to R2 with: wrangler r2 object put moltbot-data/wacli/session.db --file ~/.wacli/session.db
 }
 
 /**

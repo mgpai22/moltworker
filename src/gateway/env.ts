@@ -63,5 +63,20 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
 
+  // Skill API keys
+  if (env.GOOGLE_PLACES_API_KEY) envVars.GOOGLE_PLACES_API_KEY = env.GOOGLE_PLACES_API_KEY;
+  if (env.AUTH_TOKEN) envVars.AUTH_TOKEN = env.AUTH_TOKEN;
+  if (env.CT0) envVars.CT0 = env.CT0;
+  if (env.GH_TOKEN) envVars.GH_TOKEN = env.GH_TOKEN;
+  if (env.NIA_API_KEY) envVars.NIA_API_KEY = env.NIA_API_KEY;
+  if (env.IMGBB_API_KEY) envVars.IMGBB_API_KEY = env.IMGBB_API_KEY;
+  if (env.OBSIDIAN_API_URL) envVars.OBSIDIAN_API_URL = env.OBSIDIAN_API_URL;
+  if (env.OBSIDIAN_API_KEY) envVars.OBSIDIAN_API_KEY = env.OBSIDIAN_API_KEY;
+  if (env.BW_EMAIL) envVars.BW_EMAIL = env.BW_EMAIL;
+  if (env.BW_PASSWORD) envVars.BW_PASSWORD = env.BW_PASSWORD;
+  // Summarize skill (optional)
+  if (env.GEMINI_API_KEY) envVars.GEMINI_API_KEY = env.GEMINI_API_KEY;
+  if (env.OPENROUTER_API_KEY) envVars.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
+
   return envVars;
 }
