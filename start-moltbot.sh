@@ -344,9 +344,12 @@ if (process.env.DISCORD_BOT_TOKEN) {
     const discordDmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
     config.channels.discord.dm = config.channels.discord.dm || {};
     config.channels.discord.dm.policy = discordDmPolicy;
-    // "open" policy requires allowFrom: ["*"]
     if (discordDmPolicy === 'open') {
+        // "open" policy requires allowFrom: ["*"]
         config.channels.discord.dm.allowFrom = ['*'];
+    } else {
+        // "pairing" policy needs explicit empty allowFrom
+        config.channels.discord.dm.allowFrom = [];
     }
 }
 

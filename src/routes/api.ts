@@ -31,9 +31,9 @@ adminApi.get('/devices', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run moltbot CLI to list devices (CLI is still named clawdbot until upstream renames)
+    // Run openclaw CLI to list devices
     // Must specify --url to connect to the gateway running in the same container
-    const proc = await sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789');
+    const proc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -84,8 +84,8 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run moltbot CLI to approve the device (CLI is still named clawdbot)
-    const proc = await sandbox.startProcess(`clawdbot devices approve ${requestId} --url ws://localhost:18789`);
+    // Run openclaw CLI to approve the device
+    const proc = await sandbox.startProcess(`openclaw devices approve ${requestId} --url ws://localhost:18789`);
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -116,8 +116,8 @@ adminApi.post('/devices/approve-all', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // First, get the list of pending devices (CLI is still named clawdbot)
-    const listProc = await sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789');
+    // First, get the list of pending devices
+    const listProc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
     await waitForProcess(listProc, CLI_TIMEOUT_MS);
 
     const listLogs = await listProc.getLogs();
@@ -144,7 +144,7 @@ adminApi.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
-        const approveProc = await sandbox.startProcess(`clawdbot devices approve ${device.requestId} --url ws://localhost:18789`);
+        const approveProc = await sandbox.startProcess(`openclaw devices approve ${device.requestId} --url ws://localhost:18789`);
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
         const approveLogs = await approveProc.getLogs();
@@ -165,6 +165,84 @@ adminApi.post('/devices/approve-all', async (c) => {
       approved: results.filter(r => r.success).map(r => r.requestId),
       failed: results.filter(r => !r.success),
       message: `Approved ${approvedCount} of ${pending.length} device(s)`,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/pairing/:channel - List pending pairing requests for a channel
+adminApi.get('/pairing/:channel', async (c) => {
+  const sandbox = c.get('sandbox');
+  const channel = c.req.param('channel');
+
+  const validChannels = ['discord', 'telegram', 'slack', 'whatsapp', 'signal', 'imessage'];
+  if (!validChannels.includes(channel)) {
+    return c.json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` }, 400);
+  }
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const proc = await sandbox.startProcess(`openclaw pairing list ${channel} --json --url ws://localhost:18789`);
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    try {
+      // Find JSON array or object in output
+      const jsonMatch = stdout.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[0]);
+        return c.json({ channel, pending: Array.isArray(data) ? data : [data] });
+      }
+      return c.json({ channel, pending: [], raw: stdout, stderr });
+    } catch {
+      return c.json({ channel, pending: [], raw: stdout, stderr, parseError: 'Failed to parse CLI output' });
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /api/admin/pairing/:channel/:code/approve - Approve a pairing code
+adminApi.post('/pairing/:channel/:code/approve', async (c) => {
+  const sandbox = c.get('sandbox');
+  const channel = c.req.param('channel');
+  const code = c.req.param('code');
+
+  const validChannels = ['discord', 'telegram', 'slack', 'whatsapp', 'signal', 'imessage'];
+  if (!validChannels.includes(channel)) {
+    return c.json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` }, 400);
+  }
+
+  if (!code || code.length < 4) {
+    return c.json({ error: 'Valid pairing code is required' }, 400);
+  }
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const proc = await sandbox.startProcess(`openclaw pairing approve ${channel} ${code} --notify`);
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+
+    return c.json({
+      success,
+      channel,
+      code,
+      message: success ? 'Pairing approved' : 'Approval may have failed',
+      stdout,
+      stderr,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -30,6 +30,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+.secrets*
 
 # TypeScript
 *.tsbuildinfo
@@ -45,6 +46,7 @@ Thumbs.db
 
 # playwright-cli
 .playwright-cli/
+.playwright-cli/.secrets*
 
 # Terraform
 *.tfstate
