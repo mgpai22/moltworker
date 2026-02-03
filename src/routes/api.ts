@@ -318,6 +318,113 @@ adminApi.post('/storage/sync', async (c) => {
   }
 });
 
+// POST /api/admin/wacli/restore - Restore wacli session from R2
+// Upload to R2 first with: wrangler r2 object put moltbot-data/wacli/session.db --file ~/.wacli/session.db
+adminApi.post('/wacli/restore', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    // Mount R2 if needed
+    await mountR2Storage(sandbox, c.env);
+
+    // Remove existing local wacli dir and recreate
+    const rmProc = await sandbox.startProcess('rm -rf /root/.wacli && mkdir -p /root/.wacli');
+    await waitForProcess(rmProc, 10000);
+
+    // Check R2 file sizes first
+    const r2SizeProc = await sandbox.startProcess(`stat -c '%s' ${R2_MOUNT_PATH}/wacli/session.db ${R2_MOUNT_PATH}/wacli/wacli.db 2>&1`);
+    await waitForProcess(r2SizeProc, 10000);
+    const r2SizeLogs = await r2SizeProc.getLogs();
+
+    // Use rsync instead of cp - handles mounted filesystems better
+    // --progress shows transfer progress, --checksum verifies file integrity
+    const copyProc = await sandbox.startProcess(`rsync -av --progress ${R2_MOUNT_PATH}/wacli/ /root/.wacli/ 2>&1`);
+    await waitForProcess(copyProc, 60000); // Longer timeout for large files
+    const copyLogs = await copyProc.getLogs();
+
+    // Verify sizes match
+    const localSizeProc = await sandbox.startProcess(`stat -c '%s' /root/.wacli/session.db /root/.wacli/wacli.db 2>&1`);
+    await waitForProcess(localSizeProc, 10000);
+    const localSizeLogs = await localSizeProc.getLogs();
+
+    // Check wacli status
+    const statusProc = await sandbox.startProcess('wacli auth status 2>&1');
+    await waitForProcess(statusProc, 15000);
+    const statusLogs = await statusProc.getLogs();
+
+    return c.json({
+      success: true,
+      r2_sizes: r2SizeLogs.stdout,
+      rsync_output: copyLogs.stdout,
+      local_sizes: localSizeLogs.stdout,
+      wacli_status: statusLogs.stdout,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/wacli/debug - Debug wacli session files
+adminApi.get('/wacli/debug', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    // Check R2 mount
+    const r2Proc = await sandbox.startProcess(`ls -la ${R2_MOUNT_PATH}/wacli/ 2>&1 || echo "R2 wacli dir not found"`);
+    await waitForProcess(r2Proc, 10000);
+    const r2Logs = await r2Proc.getLogs();
+
+    // Check local wacli dir
+    const localProc = await sandbox.startProcess('ls -la /root/.wacli/ 2>&1 || echo "Local wacli dir not found"');
+    await waitForProcess(localProc, 10000);
+    const localLogs = await localProc.getLogs();
+
+    // Check R2 mount status
+    const mountProc = await sandbox.startProcess('mount | grep s3fs || echo "No s3fs mount found"');
+    await waitForProcess(mountProc, 10000);
+    const mountLogs = await mountProc.getLogs();
+
+    return c.json({
+      r2_wacli: r2Logs.stdout,
+      local_wacli: localLogs.stdout,
+      s3fs_mount: mountLogs.stdout,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/wacli/status - Check wacli auth status
+adminApi.get('/wacli/status', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const proc = await sandbox.startProcess('wacli auth status');
+    await waitForProcess(proc, 10000);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    const authenticated = stdout.toLowerCase().includes('authenticated') ||
+                          stdout.toLowerCase().includes('logged in') ||
+                          !stdout.toLowerCase().includes('not authenticated');
+
+    return c.json({
+      authenticated,
+      stdout,
+      stderr,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 // POST /api/admin/gateway/restart - Kill the current gateway and start a new one
 adminApi.post('/gateway/restart', async (c) => {
   const sandbox = c.get('sandbox');
