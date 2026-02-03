@@ -98,10 +98,30 @@ When adding new functionality, add corresponding tests.
 
 ## Documentation
 
+**Always check `docs/` for detailed guides:**
+
+| File | Description |
+|------|-------------|
+| `docs/SKILLS.md` | How to create and add new skills |
+| `docs/SKILL-ENV-VARS.md` | Environment variables for all skills |
+| `docs/DEPLOYMENT.md` | Deployment and configuration guide |
+
+**Other docs:**
 - `README.md` - User-facing documentation (setup, configuration, usage)
 - `AGENTS.md` - This file, for AI agents
+- `skills/<name>/SKILL.md` - Documentation for each skill
 
 Development documentation goes in AGENTS.md, not README.md.
+
+## Skills
+
+Skills are in `skills/` directory. Each skill has a `SKILL.md` with full documentation.
+
+**Available skills:** agent-browser, bird (Twitter), bitwarden, cloudflare-browser, github, imgbb, nia, obsidian, summarize, whatsapp
+
+**Adding a new skill:** See `docs/SKILLS.md` for the complete guide.
+
+**Skill API keys:** See `docs/SKILL-ENV-VARS.md` for all environment variables.
 
 ---
 
