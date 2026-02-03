@@ -131,6 +131,26 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# Restore wacli (WhatsApp CLI) session from R2 if available
+# This allows WhatsApp to work without re-authenticating via QR code
+# NOTE: Must use rsync instead of cp - s3fs mounted filesystems don't work well with cp
+WACLI_DIR="/root/.wacli"
+if [ -f "$BACKUP_DIR/wacli/session.db" ]; then
+    echo "Restoring wacli session from R2 using rsync..."
+    mkdir -p "$WACLI_DIR"
+    rsync -av "$BACKUP_DIR/wacli/" "$WACLI_DIR/" 2>&1 || echo "Warning: rsync failed"
+    # Verify file sizes match
+    R2_SIZE=$(stat -c '%s' "$BACKUP_DIR/wacli/session.db" 2>/dev/null || echo "0")
+    LOCAL_SIZE=$(stat -c '%s' "$WACLI_DIR/session.db" 2>/dev/null || echo "0")
+    if [ "$R2_SIZE" = "$LOCAL_SIZE" ] && [ "$R2_SIZE" != "0" ]; then
+        echo "Restored wacli session (session.db: $LOCAL_SIZE bytes)"
+    else
+        echo "Warning: wacli session restore incomplete (R2: $R2_SIZE, local: $LOCAL_SIZE)"
+    fi
+else
+    echo "No wacli session in R2, WhatsApp skill requires QR auth"
+fi
+
 # ============================================================
 # SEED WORKSPACE FILES (only if they don't already exist)
 # ============================================================
@@ -468,12 +488,60 @@ if (isOpenAI) {
 config.skills = config.skills || {};
 config.skills.entries = config.skills.entries || {};
 
+// ImgBB skill (image uploads)
+config.skills.entries.imgbb = config.skills.entries.imgbb || {};
+config.skills.entries.imgbb.enabled = true;
+if (process.env.IMGBB_API_KEY) {
+    config.skills.entries.imgbb.env = { IMGBB_API_KEY: process.env.IMGBB_API_KEY };
+    console.log('Configured imgbb skill with API key');
+} else {
+    console.log('Configured imgbb skill (no API key set)');
+}
+
 if (process.env.GOOGLE_PLACES_API_KEY) {
     config.skills.entries.goplaces = config.skills.entries.goplaces || {};
     config.skills.entries.goplaces.enabled = true;
     config.skills.entries.goplaces.apiKey = process.env.GOOGLE_PLACES_API_KEY;
     config.skills.entries.goplaces.env = { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY };
     console.log('Configured goplaces skill with API key');
+}
+
+// Bird skill (X/Twitter CLI for reading tweets, search, bookmarks, news)
+if (process.env.AUTH_TOKEN && process.env.CT0) {
+    config.skills.entries.bird = config.skills.entries.bird || {};
+    config.skills.entries.bird.enabled = true;
+    config.skills.entries.bird.env = { AUTH_TOKEN: process.env.AUTH_TOKEN, CT0: process.env.CT0 };
+    console.log('Configured bird skill with Twitter credentials');
+}
+
+// GitHub skill (gh CLI for issues, PRs, CI runs, API)
+if (process.env.GH_TOKEN) {
+    config.skills.entries.github = config.skills.entries.github || {};
+    config.skills.entries.github.enabled = true;
+    config.skills.entries.github.env = { GH_TOKEN: process.env.GH_TOKEN };
+    console.log('Configured github skill with token');
+}
+
+// Obsidian skill (REST API for notes, search, periodic notes)
+if (process.env.OBSIDIAN_API_URL && process.env.OBSIDIAN_API_KEY) {
+    config.skills.entries.obsidian = config.skills.entries.obsidian || {};
+    config.skills.entries.obsidian.enabled = true;
+    config.skills.entries.obsidian.env = {
+        OBSIDIAN_API_URL: process.env.OBSIDIAN_API_URL,
+        OBSIDIAN_API_KEY: process.env.OBSIDIAN_API_KEY
+    };
+    console.log('Configured obsidian skill with REST API');
+}
+
+// Bitwarden skill (password manager)
+if (process.env.BW_EMAIL && process.env.BW_PASSWORD) {
+    config.skills.entries.bitwarden = config.skills.entries.bitwarden || {};
+    config.skills.entries.bitwarden.enabled = true;
+    config.skills.entries.bitwarden.env = {
+        BW_EMAIL: process.env.BW_EMAIL,
+        BW_PASSWORD: process.env.BW_PASSWORD
+    };
+    console.log('Configured bitwarden skill with credentials');
 }
 
 // Nia MCP server (knowledge agent for searching indexed repos/docs)
@@ -484,6 +552,19 @@ if (process.env.GOOGLE_PLACES_API_KEY) {
 if (process.env.NIA_API_KEY) {
     console.log('NIA_API_KEY available (will be passed via env, not config)');
 }
+
+// Summarize skill (URL/YouTube/podcast/PDF summarization)
+// Uses ANTHROPIC_API_KEY by default (already available from main config)
+// Optional: GEMINI_API_KEY, OPENROUTER_API_KEY for additional providers
+config.skills.entries.summarize = config.skills.entries.summarize || {};
+config.skills.entries.summarize.enabled = true;
+const summarizeEnv = {};
+if (process.env.GEMINI_API_KEY) summarizeEnv.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (process.env.OPENROUTER_API_KEY) summarizeEnv.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+if (Object.keys(summarizeEnv).length > 0) {
+    config.skills.entries.summarize.env = summarizeEnv;
+}
+console.log('Configured summarize skill (uses ANTHROPIC_API_KEY by default)');
 
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -525,6 +606,46 @@ fi
     if [ -n "$NIA_API_KEY" ]; then
         ENV_LINES="${ENV_LINES}NIA_API_KEY=${NIA_API_KEY}\n"
         export NIA_API_KEY
+    fi
+    if [ -n "$IMGBB_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}IMGBB_API_KEY=${IMGBB_API_KEY}\n"
+        export IMGBB_API_KEY
+    fi
+    if [ -n "$AUTH_TOKEN" ]; then
+        ENV_LINES="${ENV_LINES}AUTH_TOKEN=${AUTH_TOKEN}\n"
+        export AUTH_TOKEN
+    fi
+    if [ -n "$CT0" ]; then
+        ENV_LINES="${ENV_LINES}CT0=${CT0}\n"
+        export CT0
+    fi
+    if [ -n "$GH_TOKEN" ]; then
+        ENV_LINES="${ENV_LINES}GH_TOKEN=${GH_TOKEN}\n"
+        export GH_TOKEN
+    fi
+    if [ -n "$OBSIDIAN_API_URL" ]; then
+        ENV_LINES="${ENV_LINES}OBSIDIAN_API_URL=${OBSIDIAN_API_URL}\n"
+        export OBSIDIAN_API_URL
+    fi
+    if [ -n "$OBSIDIAN_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}OBSIDIAN_API_KEY=${OBSIDIAN_API_KEY}\n"
+        export OBSIDIAN_API_KEY
+    fi
+    if [ -n "$BW_EMAIL" ]; then
+        ENV_LINES="${ENV_LINES}BW_EMAIL=${BW_EMAIL}\n"
+        export BW_EMAIL
+    fi
+    if [ -n "$BW_PASSWORD" ]; then
+        ENV_LINES="${ENV_LINES}BW_PASSWORD=${BW_PASSWORD}\n"
+        export BW_PASSWORD
+    fi
+    if [ -n "$GEMINI_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}GEMINI_API_KEY=${GEMINI_API_KEY}\n"
+        export GEMINI_API_KEY
+    fi
+    if [ -n "$OPENROUTER_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}OPENROUTER_API_KEY=${OPENROUTER_API_KEY}\n"
+        export OPENROUTER_API_KEY
     fi
     if [ -n "$ENV_LINES" ]; then
         printf "$ENV_LINES" > /root/clawd/.env
