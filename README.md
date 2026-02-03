@@ -309,16 +309,23 @@ All endpoints require the `CDP_SECRET` header for authentication.
 
 The container includes pre-installed skills in `/root/clawd/skills/`:
 
-### cloudflare-browser
+| Skill | Description | Env Vars Required |
+|-------|-------------|-------------------|
+| **bird** | X/Twitter CLI for reading tweets, search, bookmarks, news | `AUTH_TOKEN`, `CT0` |
+| **bitwarden** | Password manager CLI integration | `BW_SESSION` or `BW_CLIENTID`/`BW_CLIENTSECRET` |
+| **cloudflare-browser** | Headless browser automation via CDP | `CDP_SECRET`, `WORKER_URL` |
+| **github** | GitHub CLI for issues, PRs, CI runs, API queries | `GH_TOKEN` |
+| **nia** | Code/documentation indexing and search | `NIA_API_KEY` |
+| **obsidian** | Interact with Obsidian vaults - search, create, read notes | `OBSIDIAN_VAULT_PATH` (optional) |
 
-Browser automation via the CDP shim. Requires `CDP_SECRET` and `WORKER_URL` to be set (see [Browser Automation](#optional-browser-automation-cdp) above).
+Each skill has a `SKILL.md` with full documentation. See `skills/<name>/SKILL.md` for details.
 
-**Scripts:**
-- `screenshot.js` - Capture a screenshot of a URL
-- `video.js` - Create a video from multiple URLs
-- `cdp-client.js` - Reusable CDP client library
+### Adding Custom Skills
 
-**Usage:**
+See [docs/SKILLS.md](docs/SKILLS.md) for a comprehensive guide on creating and adding new skills.
+
+### Example: cloudflare-browser
+
 ```bash
 # Screenshot
 node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
@@ -326,8 +333,6 @@ node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example
 # Video from multiple URLs
 node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
 ```
-
-See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 ## Optional: Cloudflare AI Gateway
 
