@@ -10,7 +10,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
          arm64) NODE_ARCH="arm64" ;; \
          *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
        esac \
-    && apt-get update && apt-get install -y xz-utils ca-certificates rsync \
+    && apt-get update && apt-get install -y xz-utils ca-certificates rsync tmux \
     && curl -fsSLk https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz -o /tmp/node.tar.xz \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz \
@@ -25,6 +25,20 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@2026.1.29 \
     && openclaw --version
 
+# Install agent-browser CLI (headless browser automation for AI agents)
+RUN npm install -g agent-browser \
+    && agent-browser install --with-deps 2>/dev/null || true
+
+# Install Bitwarden CLI (credential management)
+RUN npm install -g @bitwarden/cli \
+    && bw --version
+
+# Install goplaces CLI (Google Places API)
+RUN curl -fsSL https://github.com/steipete/goplaces/releases/download/v0.2.1/goplaces_0.2.1_linux_amd64.tar.gz -o /tmp/goplaces.tar.gz \
+    && tar -xzf /tmp/goplaces.tar.gz -C /usr/local/bin goplaces \
+    && rm /tmp/goplaces.tar.gz \
+    && goplaces --help > /dev/null 2>&1
+
 # Create moltbot directories
 # Templates are stored in /root/.openclaw-templates for initialization
 RUN mkdir -p /root/.openclaw \
@@ -33,7 +47,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-01-28-v26-browser-skill
+ARG CACHE_BUST=2026-01-31-v31
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 

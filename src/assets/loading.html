@@ -162,14 +162,17 @@
         // Update status message based on state
         if (data.status === 'not_running') {
           statusEl.textContent = 'Container is starting up...';
+        } else if (data.status === 'starting') {
+          statusEl.textContent = 'Gateway is starting up...';
         } else if (data.status === 'not_responding') {
           statusEl.textContent = 'Container started, waiting for gateway...';
         } else {
           statusEl.textContent = 'Checking status... (poll #' + pollCount + ')';
         }
         
-        // Continue polling
-        setTimeout(checkStatus, 2000);
+        // Continue polling (10s interval — gateway needs 30-60s to start,
+        // aggressive polling just wastes containerFetch calls)
+        setTimeout(checkStatus, 10000);
         
       } catch (err) {
         consecutiveErrors++;

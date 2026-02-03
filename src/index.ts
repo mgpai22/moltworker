@@ -26,7 +26,7 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
+import { syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
@@ -116,14 +116,11 @@ const app = new Hono<AppEnv>();
 // MIDDLEWARE: Applied to ALL routes
 // =============================================================================
 
-// Middleware: Log every request
+// Middleware: Log every request (path only — env checks moved to /debug)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const redactedSearch = redactSensitiveParams(url);
   console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
-  console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
-  console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
-  console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
   await next();
 });
 
@@ -225,46 +222,48 @@ app.all('*', async (c) => {
 
   console.log('[PROXY] Handling request:', url.pathname);
 
-  // Check if gateway is already running
-  const existingProcess = await findExistingMoltbotProcess(sandbox);
-  const isGatewayReady = existingProcess !== null && existingProcess.status === 'running';
+  // Inject gateway token into proxied request URL. The OpenClaw gateway checks
+  // the ?token= query parameter on both HTTP requests and WebSocket upgrades.
+  // Since Cloudflare Access already handles user authentication, we inject
+  // the token transparently so users don't need to manage it.
+  const gatewayToken = c.env.MOLTBOT_GATEWAY_TOKEN;
+  let proxiedRequest = request;
+  if (gatewayToken && !url.searchParams.has('token')) {
+    const proxiedUrl = new URL(request.url);
+    proxiedUrl.searchParams.set('token', gatewayToken);
+    proxiedRequest = new Request(proxiedUrl.toString(), request);
+  }
 
-  // For browser requests (non-WebSocket, non-API), show loading page if gateway isn't ready
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
 
-  if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
-    console.log('[PROXY] Gateway not ready, serving loading page');
-
-    // Start the gateway in the background (don't await)
-    c.executionCtx.waitUntil(
-      ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
-        console.error('[PROXY] Background gateway start failed:', err);
-      })
+  // Quick port check — if the gateway is running, skip startup entirely.
+  // This is the fast path for normal operation (port responds in <100ms).
+  let portUp = false;
+  try {
+    const healthReq = new Request('http://localhost/health');
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
     );
-
-    // Return the loading page immediately
-    return c.html(loadingPageHtml);
+    const resp = await Promise.race([
+      sandbox.containerFetch(healthReq, MOLTBOT_PORT),
+      timeout,
+    ]);
+    portUp = resp.status < 500;
+  } catch {
+    // Port not responding
   }
 
-  // Ensure moltbot is running (this will wait for startup)
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-  } catch (error) {
-    console.error('[PROXY] Failed to start Moltbot:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-    let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY) {
-      hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
-    } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
-      hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
+  if (!portUp) {
+    console.log('[PROXY] Gateway not up, serving loading page');
+    if (acceptsHtml && !isWebSocketRequest) {
+      // Return loading page — /api/status handles starting the gateway
+      return c.html(loadingPageHtml);
     }
-
+    // Non-HTML requests get a 503
     return c.json({
-      error: 'Moltbot gateway failed to start',
-      details: errorMessage,
-      hint,
+      error: 'Moltbot gateway is not running',
+      hint: 'The gateway is starting up. Please retry in a few seconds.',
     }, 503);
   }
 
@@ -278,8 +277,8 @@ app.all('*', async (c) => {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
 
-    // Get WebSocket connection to the container
-    const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+    // Get WebSocket connection to the container (with token in URL)
+    const containerResponse = await sandbox.wsConnect(proxiedRequest, MOLTBOT_PORT);
     console.log('[WS] wsConnect response status:', containerResponse.status);
 
     // Get the container-side WebSocket
@@ -306,13 +305,48 @@ app.all('*', async (c) => {
       console.log('[WS] serverWs.readyState:', serverWs.readyState);
     }
 
-    // Relay messages from client to container
+    // Relay messages from client to container, injecting gateway token into
+    // connect messages. The OpenClaw web UI authenticates by sending the token
+    // inside the WebSocket `connect` message payload (not via URL query params).
+    // Since Cloudflare Access already handles user auth, we inject the token
+    // transparently so users don't need to configure it in the UI.
     serverWs.addEventListener('message', (event) => {
       if (debugLogs) {
         console.log('[WS] Client -> Container:', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)');
       }
+      let data = event.data;
+
+      // Intercept connect messages to:
+      // 1. Inject the gateway token (so users don't need to manage it)
+      // 2. Strip the device object (so allowInsecureAuth can work)
+      //
+      // The web UI sends a device signature in the connect message, but since
+      // connections go through the Worker proxy, the device key generated in
+      // the browser won't match what the gateway expects. With
+      // allowInsecureAuth=true, the gateway allows connections WITHOUT a device
+      // object, but still validates (and rejects) invalid signatures if one is
+      // present. So we strip it entirely.
+      if (gatewayToken && typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.method === 'connect' || parsed.type === 'connect') {
+            if (debugLogs) {
+              console.log('[WS] Intercepting connect message - injecting token, stripping device');
+            }
+            parsed.params = parsed.params || {};
+            parsed.params.auth = parsed.params.auth || {};
+            parsed.params.auth.token = gatewayToken;
+            // Remove device identity so gateway uses allowInsecureAuth path
+            delete parsed.params.device;
+            data = JSON.stringify(parsed);
+          }
+        } catch {
+          // Not JSON, forward as-is
+        }
+      }
+
       if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
+        containerWs.send(data);
       } else if (debugLogs) {
         console.log('[WS] Container not open, readyState:', containerWs.readyState);
       }
@@ -400,7 +434,7 @@ app.all('*', async (c) => {
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
-  const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
+  const httpResponse = await sandbox.containerFetch(proxiedRequest, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
 
   // Add debug header to verify worker handled the request

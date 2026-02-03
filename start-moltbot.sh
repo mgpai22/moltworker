@@ -8,11 +8,22 @@
 
 set -e
 
-# Check if openclaw gateway is already running - bail early if so
-if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
-    echo "Moltbot gateway is already running, exiting."
-    exit 0
+# Kill any existing gateway AND old startup scripts so we always start fresh.
+# After deploys / DO resets, zombie processes accumulate and block the port.
+# Using []-bracket trick in grep avoids matching grep itself.
+MY_PID=$$
+EXISTING_GW_PIDS=$(ps aux | grep '[o]penclaw gateway' | awk '{print $2}' || true)
+if [ -n "$EXISTING_GW_PIDS" ]; then
+    echo "Found existing gateway processes, killing: $EXISTING_GW_PIDS"
+    echo "$EXISTING_GW_PIDS" | xargs -r kill 2>/dev/null || true
 fi
+# Kill old startup scripts (except current process)
+EXISTING_STARTUP_PIDS=$(ps aux | grep '[s]tart-moltbot' | awk '{print $2}' | grep -v "^${MY_PID}$" || true)
+if [ -n "$EXISTING_STARTUP_PIDS" ]; then
+    echo "Found old startup scripts, killing: $EXISTING_STARTUP_PIDS"
+    echo "$EXISTING_STARTUP_PIDS" | xargs -r kill 2>/dev/null || true
+fi
+sleep 2
 
 # Paths
 CONFIG_DIR="/root/.openclaw"
@@ -120,6 +131,73 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# ============================================================
+# SEED WORKSPACE FILES (only if they don't already exist)
+# ============================================================
+WORKSPACE_DIR="/root/clawd"
+mkdir -p "$WORKSPACE_DIR"
+
+# HEARTBEAT.md - self-improvement loop every 30 minutes
+if [ ! -f "$WORKSPACE_DIR/HEARTBEAT.md" ]; then
+    echo "Creating HEARTBEAT.md..."
+    cat > "$WORKSPACE_DIR/HEARTBEAT.md" << 'EOFHEARTBEAT'
+# Self-Review
+
+Review your last few responses in this session. For each decision you made, ask:
+- Was there a better approach?
+- Did I miss something the user implied but didn't say?
+- Did I over-engineer or under-deliver?
+
+If you find issues, append to `self-review.md` using this format:
+
+    ## YYYY-MM-DD HH:MM
+    MISS: <what you got wrong or missed>
+    FIX:  <what you should do differently next time>
+
+If nothing to log, reply with NO_REPLY.
+EOFHEARTBEAT
+fi
+
+# AGENTS.md - ensure self-review.md is read on session start
+if [ ! -f "$WORKSPACE_DIR/AGENTS.md" ]; then
+    echo "Creating AGENTS.md..."
+    cat > "$WORKSPACE_DIR/AGENTS.md" << 'EOFAGENTS'
+## Session start (required)
+- Read `SOUL.md`, `USER.md`, `memory.md`, and today+yesterday in `memory/`.
+- Read `self-review.md` if it exists — internalize past mistakes before responding.
+- Do it before responding.
+
+## Humanizer (always active)
+- Always apply the writing guidelines from `skills/humanizer/SKILL.md` to all text you produce.
+- Remove all signs of AI-generated writing patterns from your responses.
+- Write like a human: vary sentence length, have opinions, use simple words, avoid slop.
+
+## Model switching
+- Default model is Sonnet 4.5 — use it for quick tasks, Q&A, short edits, lookups.
+- Switch to Opus 4.5 only for deep work: long research, complex multi-step plans, large refactors, or anything that will take 30+ minutes of sustained reasoning.
+- When in doubt, stick with Sonnet. Opus costs more and is slower.
+EOFAGENTS
+fi
+
+# Ensure humanizer skill is referenced in AGENTS.md (for existing deployments)
+if [ -f "$WORKSPACE_DIR/AGENTS.md" ]; then
+    if ! grep -q "humanizer" "$WORKSPACE_DIR/AGENTS.md"; then
+        echo "Adding humanizer reference to existing AGENTS.md..."
+        cat >> "$WORKSPACE_DIR/AGENTS.md" << 'EOFHUMANIZER'
+
+## Humanizer (always active)
+- Always apply the writing guidelines from `skills/humanizer/SKILL.md` to all text you produce.
+- Remove all signs of AI-generated writing patterns from your responses.
+- Write like a human: vary sentence length, have opinions, use simple words, avoid slop.
+
+## Model switching
+- Default model is Sonnet 4.5 — use it for quick tasks, Q&A, short edits, lookups.
+- Switch to Opus 4.5 only for deep work: long research, complex multi-step plans, large refactors, or anything that will take 30+ minutes of sustained reasoning.
+- When in doubt, stick with Sonnet. Opus costs more and is slower.
+EOFHUMANIZER
+    fi
+fi
+
 # If config file still doesn't exist, create from template
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, initializing from template..."
@@ -178,6 +256,47 @@ if (config.models?.providers?.anthropic?.models) {
     }
 }
 
+// CRITICAL: When using OAuth token, REMOVE any apiKey from provider config.
+// OpenClaw's resolveApiKeyForProvider() checks custom provider config LAST,
+// but if it finds an apiKey there, it returns mode: "api-key" which sends
+// x-api-key header instead of Authorization: Bearer. OAuth tokens MUST use
+// Bearer header. Clean this up BEFORE writing auth profiles.
+if (process.env.ANTHROPIC_OAUTH_TOKEN && config.models?.providers?.anthropic?.apiKey) {
+    console.log('Removing stale apiKey from anthropic provider config (OAuth token takes precedence)');
+    delete config.models.providers.anthropic.apiKey;
+}
+
+// Write auth profile for OAuth token (setup-token / Claude subscription)
+// OpenClaw resolves credentials via auth profiles, NOT provider config apiKey.
+// Putting the token in providerConfig.apiKey causes it to be sent as x-api-key header,
+// but OAuth tokens require Authorization: Bearer header.
+if (process.env.ANTHROPIC_OAUTH_TOKEN) {
+    const path = require('path');
+    const agentDir = '/root/.openclaw/agents/main/agent';
+    fs.mkdirSync(agentDir, { recursive: true });
+
+    const authProfiles = {
+        version: 1,
+        profiles: {
+            'anthropic:manual': {
+                type: 'token',
+                provider: 'anthropic',
+                token: process.env.ANTHROPIC_OAUTH_TOKEN
+            }
+        }
+    };
+    fs.writeFileSync(path.join(agentDir, 'auth-profiles.json'), JSON.stringify(authProfiles, null, 2));
+    console.log('Wrote auth-profiles.json for OAuth token auth');
+
+    // Register the auth profile in config so OpenClaw knows to use it
+    config.auth = config.auth || {};
+    config.auth.profiles = config.auth.profiles || {};
+    config.auth.profiles['anthropic:manual'] = {
+        provider: 'anthropic',
+        mode: 'token'
+    };
+}
+
 
 
 // Gateway configuration
@@ -191,11 +310,13 @@ if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
 }
 
-// Allow insecure auth for dev mode
-if (process.env.OPENCLAW_DEV_MODE === 'true') {
-    config.gateway.controlUi = config.gateway.controlUi || {};
-    config.gateway.controlUi.allowInsecureAuth = true;
-}
+// Allow insecure auth for the Control UI.
+// When running behind a Cloudflare Worker with CF Access, the Worker handles
+// user authentication. The gateway's device-signature challenge-response auth
+// doesn't work through the WebSocket proxy (connections appear non-local),
+// so we bypass it here and rely on CF Access for security.
+config.gateway.controlUi = config.gateway.controlUi || {};
+config.gateway.controlUi.allowInsecureAuth = true;
 
 // Telegram configuration
 if (process.env.TELEGRAM_BOT_TOKEN) {
@@ -287,6 +408,7 @@ if (isOpenAI) {
         ]
     };
     // Include API key in provider config if set (required when using custom baseUrl)
+    // For OAuth tokens, do NOT put them in providerConfig.apiKey — auth profiles handle it
     if (process.env.ANTHROPIC_API_KEY) {
         providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
     } else if (process.env.ANTHROPIC_OAUTH_TOKEN) {
@@ -299,10 +421,65 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
     config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5-20250929';
+} else if (process.env.ANTHROPIC_API_KEY) {
+    // Standard API key without a custom base URL
+    console.log('Configuring Anthropic provider with API key (no custom base URL)');
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers.anthropic = {
+        baseUrl: 'https://api.anthropic.com',
+        api: 'anthropic-messages',
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        models: [
+            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+        ]
+    };
+    config.agents.defaults.models = config.agents.defaults.models || {};
+    config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
+    config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
+    config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5-20250929';
+} else if (process.env.ANTHROPIC_OAUTH_TOKEN) {
+    // OAuth token without a custom base URL — use built-in Anthropic catalog.
+    // Auth is handled by auth-profiles.json written above; no custom provider config needed.
+    console.log('Configuring Anthropic with OAuth token via auth profiles (built-in catalog)');
+    // Clean up any stale provider config that might have apiKey from a previous run
+    if (config.models?.providers?.anthropic) {
+        delete config.models.providers.anthropic;
+    }
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5';
 } else {
-    // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    // No API key configured - use built-in catalog and hope env vars are picked up natively
+    // Clean up any stale provider config from previous runs (e.g. expired OAuth tokens)
+    if (config.models?.providers?.anthropic) {
+        console.log('Removing stale anthropic provider config (no credentials available)');
+        delete config.models.providers.anthropic;
+    }
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5';
+}
+
+// Skill configuration (register API keys so openclaw passes them to tools)
+config.skills = config.skills || {};
+config.skills.entries = config.skills.entries || {};
+
+if (process.env.GOOGLE_PLACES_API_KEY) {
+    config.skills.entries.goplaces = config.skills.entries.goplaces || {};
+    config.skills.entries.goplaces.enabled = true;
+    config.skills.entries.goplaces.apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    config.skills.entries.goplaces.env = { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY };
+    console.log('Configured goplaces skill with API key');
+}
+
+// Nia MCP server (knowledge agent for searching indexed repos/docs)
+// NOTE: openclaw@2026.1.29 does not support "mcpServers" as a top-level config key.
+// MCP servers are configured via the gateway's MCP settings, not the config file.
+// The NIA_API_KEY is passed as an env var and written to .env files below
+// so openclaw can pick it up through its env loading chain.
+if (process.env.NIA_API_KEY) {
+    console.log('NIA_API_KEY available (will be passed via env, not config)');
 }
 
 // Write updated config
@@ -332,6 +509,26 @@ if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
     OPENCLAW_GATEWAY_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
     echo "No gateway token provided, generated random token for internal use"
 fi
+
+# Write .env files so openclaw picks up skill API keys through its env loading chain.
+# OpenClaw reads: process.env → .env (CWD) → ~/.openclaw/.env → inline config → skill config
+# Writing to both locations ensures the keys are available regardless of how openclaw resolves them.
+{
+    ENV_LINES=""
+    if [ -n "$GOOGLE_PLACES_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_PLACES_API_KEY=${GOOGLE_PLACES_API_KEY}\n"
+        export GOOGLE_PLACES_API_KEY
+    fi
+    if [ -n "$NIA_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}NIA_API_KEY=${NIA_API_KEY}\n"
+        export NIA_API_KEY
+    fi
+    if [ -n "$ENV_LINES" ]; then
+        printf "$ENV_LINES" > /root/clawd/.env
+        printf "$ENV_LINES" > "$CONFIG_DIR/.env"
+        echo "Wrote .env files for openclaw env loading"
+    fi
+}
 
 echo "Starting gateway with token auth..."
 exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$OPENCLAW_GATEWAY_TOKEN"
