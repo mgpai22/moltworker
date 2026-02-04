@@ -488,6 +488,33 @@ if (isOpenAI) {
 config.skills = config.skills || {};
 config.skills.entries = config.skills.entries || {};
 
+// Enable bundled skills (these are blocked by default unless explicitly allowed)
+// See: https://docs.openclaw.ai/gateway/configuration - allowBundled is an allowlist for bundled skills
+config.skills.allowBundled = [
+    'voice-call',      // Phone calls via Twilio/Telnyx/Plivo
+    'coding-agent',    // Agentic coding capabilities
+    'peekaboo',        // Screenshot/screen capture
+    'gemini',          // Google Gemini integration
+];
+console.log('Enabled bundled skills:', config.skills.allowBundled.join(', '));
+
+// Gemini CLI skill (OAuth login, API key, or Vertex AI)
+config.skills.entries.gemini = config.skills.entries.gemini || {};
+config.skills.entries.gemini.enabled = true;
+const geminiEnv = {};
+if (process.env.GEMINI_API_KEY) geminiEnv.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (process.env.GOOGLE_API_KEY) geminiEnv.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS) geminiEnv.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+if (process.env.GOOGLE_CLOUD_PROJECT) geminiEnv.GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
+if (process.env.GOOGLE_CLOUD_LOCATION) geminiEnv.GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION;
+if (process.env.GOOGLE_GENAI_USE_VERTEXAI) geminiEnv.GOOGLE_GENAI_USE_VERTEXAI = process.env.GOOGLE_GENAI_USE_VERTEXAI;
+if (Object.keys(geminiEnv).length > 0) {
+    config.skills.entries.gemini.env = geminiEnv;
+    console.log('Configured gemini skill with env-based auth');
+} else {
+    console.log('Configured gemini skill (uses cached login if no env vars set)');
+}
+
 // ImgBB skill (image uploads)
 config.skills.entries.imgbb = config.skills.entries.imgbb || {};
 config.skills.entries.imgbb.enabled = true;
@@ -606,6 +633,30 @@ fi
     if [ -n "$NIA_API_KEY" ]; then
         ENV_LINES="${ENV_LINES}NIA_API_KEY=${NIA_API_KEY}\n"
         export NIA_API_KEY
+    fi
+    if [ -n "$GEMINI_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}GEMINI_API_KEY=${GEMINI_API_KEY}\n"
+        export GEMINI_API_KEY
+    fi
+    if [ -n "$GOOGLE_API_KEY" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_API_KEY=${GOOGLE_API_KEY}\n"
+        export GOOGLE_API_KEY
+    fi
+    if [ -n "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}\n"
+        export GOOGLE_APPLICATION_CREDENTIALS
+    fi
+    if [ -n "$GOOGLE_CLOUD_PROJECT" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}\n"
+        export GOOGLE_CLOUD_PROJECT
+    fi
+    if [ -n "$GOOGLE_CLOUD_LOCATION" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION}\n"
+        export GOOGLE_CLOUD_LOCATION
+    fi
+    if [ -n "$GOOGLE_GENAI_USE_VERTEXAI" ]; then
+        ENV_LINES="${ENV_LINES}GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI}\n"
+        export GOOGLE_GENAI_USE_VERTEXAI
     fi
     if [ -n "$IMGBB_API_KEY" ]; then
         ENV_LINES="${ENV_LINES}IMGBB_API_KEY=${IMGBB_API_KEY}\n"

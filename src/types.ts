@@ -47,12 +47,17 @@ export interface MoltbotEnv {
   GH_TOKEN?: string; // GitHub skill
   NIA_API_KEY?: string; // Nia skill
   IMGBB_API_KEY?: string; // ImgBB uploads
+  GEMINI_API_KEY?: string; // Gemini CLI (AI Studio)
+  GOOGLE_API_KEY?: string; // Vertex AI API key for Gemini CLI
+  GOOGLE_APPLICATION_CREDENTIALS?: string; // Vertex AI service account JSON path
+  GOOGLE_CLOUD_PROJECT?: string; // GCP project for Gemini/Vertex
+  GOOGLE_CLOUD_LOCATION?: string; // GCP location for Vertex
+  GOOGLE_GENAI_USE_VERTEXAI?: string; // Route Gemini CLI via Vertex AI
   OBSIDIAN_API_URL?: string; // Obsidian skill
   OBSIDIAN_API_KEY?: string; // Obsidian skill
   BW_EMAIL?: string; // Bitwarden skill
   BW_PASSWORD?: string; // Bitwarden skill
   // Summarize skill (optional - uses ANTHROPIC_API_KEY by default)
-  GEMINI_API_KEY?: string; // Google Gemini for summarize
   OPENROUTER_API_KEY?: string; // OpenRouter free models for summarize
   // WhatsApp skill (wacli) - session stored in R2, restored via /api/admin/wacli/restore
   // Upload session to R2 with: wrangler r2 object put moltbot-data/wacli/session.db --file ~/.wacli/session.db
