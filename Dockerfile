@@ -22,7 +22,7 @@ RUN npm install -g pnpm
 
 # Install OpenClaw (gateway CLI)
 # Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.1.29 \
+RUN npm install -g openclaw@2026.2.2 \
     && openclaw --version
 
 # Install agent-browser CLI (headless browser automation for AI agents)
@@ -94,7 +94,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-ARG CACHE_BUST=2026-02-04-v20
+ARG CACHE_BUST=2026-02-04-v21
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
