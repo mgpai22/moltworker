@@ -134,22 +134,54 @@ fi
 # Restore wacli (WhatsApp CLI) session from R2 if available
 # This allows WhatsApp to work without re-authenticating via QR code
 # NOTE: Must use rsync instead of cp - s3fs mounted filesystems don't work well with cp
+# RETRY LOGIC: R2 mount may not be ready on cold-start, so we retry with backoff
 WACLI_DIR="/root/.wacli"
-if [ -f "$BACKUP_DIR/wacli/session.db" ]; then
-    echo "Restoring wacli session from R2 using rsync..."
-    mkdir -p "$WACLI_DIR"
-    rsync -av "$BACKUP_DIR/wacli/" "$WACLI_DIR/" 2>&1 || echo "Warning: rsync failed"
-    # Verify file sizes match
-    R2_SIZE=$(stat -c '%s' "$BACKUP_DIR/wacli/session.db" 2>/dev/null || echo "0")
-    LOCAL_SIZE=$(stat -c '%s' "$WACLI_DIR/session.db" 2>/dev/null || echo "0")
-    if [ "$R2_SIZE" = "$LOCAL_SIZE" ] && [ "$R2_SIZE" != "0" ]; then
-        echo "Restored wacli session (session.db: $LOCAL_SIZE bytes)"
-    else
-        echo "Warning: wacli session restore incomplete (R2: $R2_SIZE, local: $LOCAL_SIZE)"
+restore_wacli_session() {
+    local max_attempts=5
+    local attempt=1
+    local wait_time=2
+
+    while [ $attempt -le $max_attempts ]; do
+        if [ -f "$BACKUP_DIR/wacli/session.db" ]; then
+            echo "Restoring wacli session from R2 (attempt $attempt/$max_attempts)..."
+            mkdir -p "$WACLI_DIR"
+
+            if rsync -av "$BACKUP_DIR/wacli/" "$WACLI_DIR/" 2>&1; then
+                # Verify file sizes match
+                R2_SIZE=$(stat -c '%s' "$BACKUP_DIR/wacli/session.db" 2>/dev/null || echo "0")
+                LOCAL_SIZE=$(stat -c '%s' "$WACLI_DIR/session.db" 2>/dev/null || echo "0")
+
+                if [ "$R2_SIZE" = "$LOCAL_SIZE" ] && [ "$R2_SIZE" != "0" ]; then
+                    echo "Restored wacli session (session.db: $LOCAL_SIZE bytes)"
+                    return 0
+                else
+                    echo "Warning: wacli session restore incomplete (R2: $R2_SIZE, local: $LOCAL_SIZE)"
+                fi
+            else
+                echo "Warning: rsync failed on attempt $attempt"
+            fi
+        elif [ -d "$BACKUP_DIR" ]; then
+            echo "Waiting for R2 wacli files (attempt $attempt/$max_attempts)..."
+        else
+            echo "R2 not mounted yet, waiting (attempt $attempt/$max_attempts)..."
+        fi
+
+        if [ $attempt -lt $max_attempts ]; then
+            echo "Retrying in ${wait_time}s..."
+            sleep $wait_time
+            wait_time=$((wait_time * 2))  # Exponential backoff: 2, 4, 8, 16s
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    # Final check after all retries
+    if [ ! -f "$BACKUP_DIR/wacli/session.db" ]; then
+        echo "No wacli session in R2 after $max_attempts attempts, WhatsApp skill requires QR auth"
     fi
-else
-    echo "No wacli session in R2, WhatsApp skill requires QR auth"
-fi
+    return 1
+}
+
+restore_wacli_session
 
 # ============================================================
 # SEED WORKSPACE FILES (only if they don't already exist)
