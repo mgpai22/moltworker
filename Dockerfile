@@ -57,6 +57,10 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && rm -rf /tmp/gh* \
     && gh --version
 
+# Install Gemini CLI
+RUN npm install -g @google/gemini-cli@latest \
+    && gemini --version
+
 # Install Go and build wacli (WhatsApp CLI)
 # wacli only releases macOS binaries, so we build from source for Linux
 # CGO is required for SQLite FTS5 support
@@ -90,7 +94,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-ARG CACHE_BUST=2026-02-03-v13
+ARG CACHE_BUST=2026-02-04-v15
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
