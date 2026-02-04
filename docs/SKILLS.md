@@ -424,3 +424,35 @@ All files in `skills/` are automatically included.
 - Verify SKILL.md has valid YAML frontmatter
 - Check the slug matches the directory name
 - Redeploy to update the container
+- **Bump CACHE_BUST** if files aren't being picked up (see below)
+
+### New skill files not included after deploy (Docker layer caching)
+
+**Problem:** You add a new skill folder or modify skill files, run `npm run deploy`, but the changes don't appear in the deployed container.
+
+**Cause:** Docker layer caching. When you deploy, Docker builds the image using cached layers when possible. The `COPY skills/` step may use a cached layer from a previous build, missing your new files. This happens because:
+- The Dockerfile itself hasn't changed
+- Docker's cache invalidation can miss new subdirectories in some cases
+
+**Solution:** Bump the `CACHE_BUST` argument in the Dockerfile to force a fresh build:
+
+```dockerfile
+# Before
+ARG CACHE_BUST=2026-02-04-v15
+
+# After (increment the version)
+ARG CACHE_BUST=2026-02-04-v16
+```
+
+Then redeploy:
+```bash
+npm run deploy
+```
+
+The `CACHE_BUST` arg is placed before the `COPY` commands, so changing it invalidates all subsequent layers and forces Docker to re-run `COPY skills/`, picking up your new files.
+
+**When to bump CACHE_BUST:**
+- Adding a new skill folder
+- Modifying skill scripts that aren't being picked up
+- Updating `start-moltbot.sh` or `moltbot.json.template`
+- Any time deployed behavior doesn't match your local changes
