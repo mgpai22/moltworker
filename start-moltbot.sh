@@ -364,12 +364,28 @@ if (process.env.DISCORD_BOT_TOKEN) {
     const discordDmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
     config.channels.discord.dm = config.channels.discord.dm || {};
     config.channels.discord.dm.policy = discordDmPolicy;
+
+    // Build allowFrom list from DISCORD_ALLOWED_USERS (comma-separated user IDs)
+    // These users are permanently whitelisted and don't need to pair after redeployment
+    const allowedUsers = [];
+    if (process.env.DISCORD_ALLOWED_USERS) {
+        const users = process.env.DISCORD_ALLOWED_USERS.split(',').map(u => u.trim()).filter(Boolean);
+        allowedUsers.push(...users);
+        console.log('Discord whitelisted users:', users.join(', '));
+    }
+
     if (discordDmPolicy === 'open') {
         // "open" policy requires allowFrom: ["*"]
         config.channels.discord.dm.allowFrom = ['*'];
     } else {
-        // "pairing" policy needs explicit empty allowFrom
-        config.channels.discord.dm.allowFrom = [];
+        // Use allowlist policy if we have whitelisted users, otherwise pairing
+        // allowFrom contains permanently whitelisted user IDs
+        config.channels.discord.dm.allowFrom = allowedUsers;
+        if (allowedUsers.length > 0) {
+            // Switch to allowlist mode when we have explicit users - they can DM without pairing
+            // But keep pairing enabled so new users can still request access
+            console.log('Discord using policy:', discordDmPolicy, 'with', allowedUsers.length, 'whitelisted user(s)');
+        }
     }
 }
 
