@@ -490,11 +490,10 @@ config.skills.entries = config.skills.entries || {};
 
 // Enable bundled skills (these are blocked by default unless explicitly allowed)
 // See: https://docs.openclaw.ai/gateway/configuration - allowBundled is an allowlist for bundled skills
+// Note: 'gemini' is NOT included - we use our custom skill in skills/gemini/ instead
 config.skills.allowBundled = [
     'voice-call',      // Phone calls via Twilio/Telnyx/Plivo
     'coding-agent',    // Agentic coding capabilities
-    'peekaboo',        // Screenshot/screen capture
-    'gemini',          // Google Gemini integration
 ];
 console.log('Enabled bundled skills:', config.skills.allowBundled.join(', '));
 
