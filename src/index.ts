@@ -73,18 +73,14 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   }
 
   // Check for AI provider configuration (at least one must be set)
-  const hasCloudflareGateway = !!(
-    env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
-    env.CF_AI_GATEWAY_ACCOUNT_ID &&
-    env.CF_AI_GATEWAY_GATEWAY_ID
-  );
-  const hasLegacyGateway = !!(env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL);
   const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
+  const hasAnthropicOAuth = !!env.ANTHROPIC_OAUTH_TOKEN;
   const hasOpenAIKey = !!env.OPENAI_API_KEY;
+  const hasGatewayKey = !!env.AI_GATEWAY_API_KEY;
 
-  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey) {
+  if (!hasAnthropicKey && !hasAnthropicOAuth && !hasOpenAIKey && !hasGatewayKey) {
     missing.push(
-      'ANTHROPIC_API_KEY, OPENAI_API_KEY, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
+      'ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, OPENAI_API_KEY, or AI_GATEWAY_API_KEY',
     );
   }
 
