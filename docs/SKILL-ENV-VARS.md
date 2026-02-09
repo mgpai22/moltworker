@@ -124,7 +124,7 @@ if (process.env.OBSIDIAN_API_URL && process.env.OBSIDIAN_API_KEY) {
     fi
 
     if [ -n "$ENV_LINES" ]; then
-        printf "$ENV_LINES" > /root/clawd/.env
+        printf "$ENV_LINES" > "/root/.openclaw/workspace/.env"
         printf "$ENV_LINES" > "$CONFIG_DIR/.env"
         echo "Wrote .env files for openclaw env loading"
     fi

@@ -22,7 +22,7 @@ RUN npm install -g pnpm
 
 # Install OpenClaw (gateway CLI)
 # Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.2.6-3 \
+RUN npm install -g openclaw@2026.2.2 \
     && openclaw --version
 
 # Install agent-browser CLI (headless browser automation for AI agents)
@@ -89,13 +89,13 @@ RUN GOBIN=/usr/local/bin go install github.com/wabarc/imgbb/cmd/imgbb@latest \
 # Create moltbot directories
 # Templates are stored in /root/.openclaw-templates for initialization
 RUN mkdir -p /root/.openclaw \
+    && mkdir -p /root/.openclaw/workspace \
     && mkdir -p /root/.openclaw-templates \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-ARG CACHE_BUST=2026-02-09-v23
-RUN echo "${CACHE_BUST}" > /etc/moltworker-cache-bust
+ARG CACHE_BUST=2026-02-05-v52
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
@@ -106,7 +106,7 @@ COPY moltbot.json.template /root/.openclaw-templates/moltbot.json.template
 COPY skills/ /root/clawd/skills/
 
 # Set working directory
-WORKDIR /root/clawd
+WORKDIR /root/.openclaw/workspace
 
 # Expose the gateway port
 EXPOSE 18789

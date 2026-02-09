@@ -78,6 +78,16 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
 }
 ```
 
+## What Persists in R2
+
+When R2 is configured, the cron sync backs up and restores the following paths:
+
+- `/root/.openclaw/` (includes `workspace/` for agent files like `memory/`, `TOOLS.md`, `tov/`)
+- `/root/clawd/skills/`
+- `/root/.wacli/` (WhatsApp session files, if present in R2)
+
+Anything outside these paths is not persisted across container restarts.
+
 ## How to Force a Container Restart
 
 ### Method 1: Change CACHE_BUST (Recommended)
@@ -256,6 +266,123 @@ Common issues:
 - Syntax errors in start-moltbot.sh
 - Port conflicts (gateway must be on 18789)
 
+## Debugging Container Startup Issues
+
+### Container Cold Start Time
+
+**The container takes 30-60 seconds to fully start.** This is normal for Cloudflare Sandbox containers.
+
+During startup:
+- `/api/status` returns `{"ok":false,"status":"starting"}`
+- Requests to container ports return `Error proxying request to container: The container is not listening`
+- After startup, `/api/status` returns `{"ok":true,"status":"running"}`
+
+### Rapid Deployments Problem
+
+**Symptom:** Container never starts, stays in "starting" state indefinitely.
+
+**Cause:** Each `wrangler deploy` with a new container image:
+1. Stops the old container
+2. Pulls the new image
+3. Starts a new container from scratch
+
+If you deploy again before the container finishes starting (~60s), you interrupt the boot cycle and it never completes.
+
+**Solution:**
+- Wait at least 90 seconds between deployments that change the container
+- If stuck, stop deploying and wait 2-3 minutes for the container to fully start
+- Use `npx wrangler tail --format pretty` to monitor real-time logs
+
+### The 90-Second Cooldown
+
+The `/api/status` endpoint has a 90-second cooldown to prevent multiple gateway start attempts:
+
+```typescript
+const GATEWAY_START_COOLDOWN_MS = 90_000;
+```
+
+This cooldown is **in-memory** and resets when:
+- The Worker's Durable Object restarts (happens on new container deploys)
+- The Worker code is updated
+
+**Debugging tip:** If the container seems stuck, the cooldown may be active. Wait for it to expire or trigger a fresh start by visiting the main site with authentication.
+
+### Checking Container State
+
+```bash
+# Check if gateway port (18789) is responding
+curl -s https://moltbot-sandbox.shishirpai001.workers.dev/api/status
+
+# If voice-call plugin is enabled, check webhook port (3334)
+curl -s -X POST https://moltbot-sandbox.shishirpai001.workers.dev/voice/webhook -d "test=1"
+
+# Expected responses:
+# - Gateway running: {"ok":true,"status":"running"}
+# - Gateway starting: {"ok":false,"status":"starting"}
+# - Voice webhook (no sig): "Unauthorized" (means plugin is running)
+# - Container not ready: "Error proxying request to container..."
+```
+
+### Real-Time Log Monitoring
+
+```bash
+# Start tail in one terminal
+npx wrangler tail --format pretty
+
+# Make a request in another terminal
+curl https://moltbot-sandbox.shishirpai001.workers.dev/api/status
+
+# Look for:
+# [status] Port up! status: 200          → Gateway running
+# [status] Cooldown active, remaining: X → In cooldown period
+# [status] Gateway not responding...     → Starting gateway
+```
+
+### Common Startup Failures
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Stays "starting" forever | Rapid redeployments | Stop deploying, wait 2-3 min |
+| "Container not listening" | Gateway failed to start | Check `start-moltbot.sh` syntax |
+| Immediate crash | Config parsing error | Validate JS in heredoc with `node --check` |
+| Port 18789 not responding | Gateway error | Check wrangler tail for errors |
+
+### R2 Config Backup Issues
+
+The gateway syncs config to R2. Old backups can override fresh deployments.
+
+**To force fresh config:**
+```bash
+# Delete the R2 backup before deploying
+npx wrangler r2 object delete moltbot-sandbox-backup/openclaw/openclaw.json --remote
+npx wrangler r2 object delete moltbot-sandbox-backup/.last-sync --remote
+
+# Then deploy
+npm run deploy
+```
+
+### Recovery Procedure
+
+If the container is completely stuck:
+
+1. **Stop making changes** - Let the current state settle
+2. **Wait 2-3 minutes** - Allow any in-progress startup to complete
+3. **Clear R2 backup** (if config issues):
+   ```bash
+   npx wrangler r2 object delete moltbot-sandbox-backup/openclaw/openclaw.json --remote
+   ```
+4. **Bump CACHE_BUST** and deploy once:
+   ```bash
+   # Increment version in Dockerfile
+   npm run deploy
+   ```
+5. **Wait 90 seconds** - Don't make any more changes
+6. **Verify with tail**:
+   ```bash
+   npx wrangler tail --format pretty
+   # Then trigger a request
+   ```
+
 ## Quick Reference
 
 | Task | Command |
@@ -265,3 +392,5 @@ Common issues:
 | Add secret | `npx wrangler secret put SECRET_NAME` |
 | View logs | `npx wrangler tail --format pretty` |
 | Force restart | Edit `CACHE_BUST` in Dockerfile, then deploy |
+| Clear R2 config | `npx wrangler r2 object delete moltbot-sandbox-backup/openclaw/openclaw.json --remote` |
+| Check container status | `curl https://moltbot-sandbox.shishirpai001.workers.dev/api/status` |

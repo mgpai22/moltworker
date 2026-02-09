@@ -13,11 +13,11 @@ const debug = new Hono<AppEnv>();
 debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
-    // Get OpenClaw version (CLI binary is `openclaw`)
-    const versionProcess = await sandbox.startProcess('openclaw --version');
+    // Get moltbot version (CLI is still named clawdbot until upstream renames)
+    const versionProcess = await sandbox.startProcess('clawdbot --version');
     await new Promise(resolve => setTimeout(resolve, 500));
     const versionLogs = await versionProcess.getLogs();
-    const openclawVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
+    const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
 
     // Get node version
     const nodeProcess = await sandbox.startProcess('node --version');
@@ -26,9 +26,7 @@ debug.get('/version', async (c) => {
     const nodeVersion = (nodeLogs.stdout || '').trim();
 
     return c.json({
-      // Back-compat: callers might still expect `moltbot_version`.
-      moltbot_version: openclawVersion,
-      openclaw_version: openclawVersion,
+      moltbot_version: moltbotVersion,
       node_version: nodeVersion,
     });
   } catch (error) {
@@ -125,10 +123,10 @@ debug.get('/gateway-api', async (c) => {
   }
 });
 
-// GET /debug/cli - Test OpenClaw CLI commands
+// GET /debug/cli - Test moltbot CLI commands (CLI is still named clawdbot)
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'openclaw --help';
+  const cmd = c.req.query('cmd') || 'clawdbot --help';
   
   try {
     const proc = await sandbox.startProcess(cmd);
@@ -342,6 +340,7 @@ debug.get('/ws-test', async (c) => {
 debug.get('/env', async (c) => {
   return c.json({
     has_anthropic_key: !!c.env.ANTHROPIC_API_KEY,
+    has_anthropic_oauth: !!c.env.ANTHROPIC_OAUTH_TOKEN,
     has_openai_key: !!c.env.OPENAI_API_KEY,
     has_gateway_token: !!c.env.MOLTBOT_GATEWAY_TOKEN,
     has_r2_access_key: !!c.env.R2_ACCESS_KEY_ID,
@@ -352,18 +351,17 @@ debug.get('/env', async (c) => {
     bind_mode: c.env.OPENCLAW_BIND_MODE,
     cf_access_team_domain: c.env.CF_ACCESS_TEAM_DOMAIN,
     has_cf_access_aud: !!c.env.CF_ACCESS_AUD,
+    // Nia
+    has_nia_api_key: !!c.env.NIA_API_KEY,
   });
 });
 
 // GET /debug/container-config - Read the moltbot config from inside the container
 debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   try {
-    // Prefer the OpenClaw config path; fall back to legacy clawdbot path if present.
-    const proc = await sandbox.startProcess(
-      `sh -lc 'if [ -f /root/.openclaw/openclaw.json ]; then cat /root/.openclaw/openclaw.json; elif [ -f /root/.clawdbot/clawdbot.json ]; then cat /root/.clawdbot/clawdbot.json; else echo \"No config file found\" >&2; exit 1; fi'`
-    );
+    const proc = await sandbox.startProcess('cat /root/.openclaw/openclaw.json');
     
     let attempts = 0;
     while (attempts < 10) {
@@ -392,6 +390,24 @@ debug.get('/container-config', async (c) => {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /debug/reset-container - Destroy the sandbox container to force a fresh start
+// This is useful after deploying a new container image to force the new image to be used
+debug.post('/reset-container', async (c) => {
+  const sandbox = c.get('sandbox');
+  try {
+    console.log('[debug] Destroying sandbox container to force fresh start...');
+    await sandbox.destroy();
+    return c.json({
+      success: true,
+      message: 'Container destroyed. Next request will create a fresh container with the latest image.',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[debug] Failed to destroy container:', errorMessage);
     return c.json({ error: errorMessage }, 500);
   }
 });
