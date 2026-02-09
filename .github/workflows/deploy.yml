@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Force container restart (CACHE_BUST)
+        run: |
+          set -euo pipefail
+          cache_bust="ci-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          sed -i "s/^ARG CACHE_BUST=.*/ARG CACHE_BUST=${cache_bust}/" Dockerfile
+          echo "Updated Dockerfile cache bust:"
+          grep -n '^ARG CACHE_BUST=' Dockerfile
+
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.jsonc --containers-rollout=immediate
+
+      - name: Restart gateway and wait for healthy
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${WORKER_URL:-}" ]; then
+            echo "WORKER_URL secret is not set; skipping post-deploy restart/warmup."
+            exit 0
+          fi
+
+          headers=()
+          if [ -n "${ADMIN_API_TOKEN:-}" ]; then
+            headers+=(-H "Authorization: Bearer ${ADMIN_API_TOKEN}")
+          fi
+          if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+            headers+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}")
+            headers+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
+          fi
+
+          # Best-effort restart. If CF Access isn't enabled or service tokens aren't configured,
+          # the route will 401 and we'll rely on container rollout + /api/status to start it.
+          echo "POST ${WORKER_URL}/api/admin/gateway/restart"
+          curl -fsS -X POST "${headers[@]}" "${WORKER_URL}/api/admin/gateway/restart" || true
+
+          echo "Waiting for ${WORKER_URL}/api/status to report running..."
+          deadline=$((SECONDS + 600))
+          while [ "${SECONDS}" -lt "${deadline}" ]; do
+            resp="$(curl -fsS "${headers[@]}" "${WORKER_URL}/api/status" || true)"
+            echo "status: ${resp}"
+            if echo "${resp}" | grep -Eq "\"status\"[[:space:]]*:[[:space:]]*\"running\""; then
+              echo "Gateway is running."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Timed out waiting for gateway to become running."
+          exit 1

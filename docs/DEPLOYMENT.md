@@ -93,6 +93,47 @@ Then deploy:
 npm run deploy
 ```
 
+## Programmatic Gateway Restart
+
+If you want to restart the gateway from automation (CI, cron, external scripts), you have two options:
+
+1. Cloudflare Access service tokens (recommended if Access is enforced at the edge).
+2. A worker-level bearer token via `ADMIN_API_TOKEN` (simpler, but only works if the request can reach the Worker).
+
+### Option A: Worker-level bearer token (`ADMIN_API_TOKEN`)
+
+1. Set the secret:
+```bash
+npx wrangler secret put ADMIN_API_TOKEN
+```
+
+2. Restart the gateway:
+```bash
+curl -X POST "https://your-worker.workers.dev/api/admin/gateway/restart" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN"
+```
+
+### Option B: Cloudflare Access service token headers
+
+If Cloudflare Access is configured to protect your Worker domain/path at the edge, requests may be blocked before they reach the Worker. In that case, use Access service tokens:
+```bash
+curl -X POST "https://your-worker.workers.dev/api/admin/gateway/restart" \
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+```
+
+### Option C: Manually bypass Cloudflare Access for only the restart route
+
+If you want `/api/admin/gateway/restart` to be reachable without Cloudflare Access (and rely on `ADMIN_API_TOKEN` in the Worker instead), create a dedicated Access application for that single path with a `bypass` policy.
+
+1. Cloudflare Zero Trust dashboard: **Access** -> **Applications** -> **Add an application** -> **Self-hosted**.
+2. Application domain: your worker host (example: `moltbot-sandbox.<subdomain>.workers.dev`).
+3. Paths: add exactly `/api/admin/gateway/restart`.
+4. Policies: add a policy with **Action** = `Bypass` and **Include** = `Everyone`.
+5. Save.
+
+Security note: if you bypass Access, the restart endpoint is protected only by `ADMIN_API_TOKEN`. Use a long random token and rotate it.
+
 ### Method 2: Touch a COPYed file
 
 Any change to files that are COPYed into the container will invalidate the cache:

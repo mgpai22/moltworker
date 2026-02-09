@@ -25,6 +25,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Enable debug routes at /debug/* (optional)
 # DEBUG_ROUTES=true
 
+# Optional: bearer token for programmatic admin API access (e.g., gateway restart)
+# ADMIN_API_TOKEN=change-me
+
 # Optional - set a fixed token instead of auto-generated
 MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
