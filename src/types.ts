@@ -7,16 +7,12 @@ export interface MoltbotEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;
   ASSETS: Fetcher; // Assets binding for admin UI static files
   MOLTBOT_BUCKET: R2Bucket; // R2 bucket for persistent storage
-  // Cloudflare AI Gateway configuration (preferred)
-  CF_AI_GATEWAY_ACCOUNT_ID?: string; // Cloudflare account ID for AI Gateway
-  CF_AI_GATEWAY_GATEWAY_ID?: string; // AI Gateway ID
-  CLOUDFLARE_AI_GATEWAY_API_KEY?: string; // API key for requests through the gateway
-  CF_AI_GATEWAY_MODEL?: string; // Override model: "provider/model-id" e.g. "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-  // Legacy AI Gateway configuration (still supported for backward compat)
+  // AI Gateway configuration
   AI_GATEWAY_API_KEY?: string; // API key for the provider configured in AI Gateway
   AI_GATEWAY_BASE_URL?: string; // AI Gateway URL (e.g., https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic)
   // Direct provider configuration
   ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_OAUTH_TOKEN?: string;
   ANTHROPIC_BASE_URL?: string;
   OPENAI_API_KEY?: string;
   MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to OPENCLAW_GATEWAY_TOKEN for container)
@@ -30,8 +26,28 @@ export interface MoltbotEnv {
   TELEGRAM_DM_ALLOW_FROM?: string;
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
+  DISCORD_ALLOWED_USERS?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
+  OPENCLAW_BIND_MODE?: string;
+  // Skill API keys
+  GOOGLE_PLACES_API_KEY?: string;
+  AUTH_TOKEN?: string;
+  CT0?: string;
+  GH_TOKEN?: string;
+  NIA_API_KEY?: string;
+  IMGBB_API_KEY?: string;
+  GEMINI_API_KEY?: string;
+  GOOGLE_API_KEY?: string;
+  GOOGLE_APPLICATION_CREDENTIALS?: string;
+  GOOGLE_CLOUD_PROJECT?: string;
+  GOOGLE_CLOUD_LOCATION?: string;
+  GOOGLE_GENAI_USE_VERTEXAI?: string;
+  OBSIDIAN_API_URL?: string;
+  OBSIDIAN_API_KEY?: string;
+  BW_EMAIL?: string;
+  BW_PASSWORD?: string;
+  OPENROUTER_API_KEY?: string;
   // Cloudflare Access configuration for admin routes
   CF_ACCESS_TEAM_DOMAIN?: string; // e.g., 'myteam.cloudflareaccess.com'
   CF_ACCESS_AUD?: string; // Application Audience (AUD) tag
