@@ -43,7 +43,7 @@ src/
 
 ### Environment Variables
 
-- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `CLAWDBOT_DEV_MODE` for container)
+- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `OPENCLAW_DEV_MODE` for container)
 - `DEBUG_ROUTES` - Enables `/debug/*` routes (disabled by default)
 - See `src/types.ts` for full `MoltbotEnv` interface
 
@@ -195,8 +195,9 @@ The Dockerfile includes a cache bust comment. When changing `moltbot.json.templa
 
 Moltbot configuration is built at container startup:
 
-1. `moltbot.json.template` is copied to `~/.clawdbot/clawdbot.json` (internal path unchanged)
-2. `start-moltbot.sh` updates the config with values from environment variables
+1. `moltbot.json.template` is baked into the image at `/root/.openclaw-templates/moltbot.json.template`
+2. On first boot (or if no config exists), `start-moltbot.sh` initializes `/root/.openclaw/openclaw.json` from that template
+3. `start-moltbot.sh` updates the config with values from environment variables
 3. Gateway starts with `--allow-unconfigured` flag (skips onboarding wizard)
 
 ### Container Environment Variables

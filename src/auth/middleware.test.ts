@@ -140,6 +140,8 @@ describe('createAccessMiddleware', () => {
     env?: Partial<MoltbotEnv>;
     jwtHeader?: string;
     cookies?: string;
+    authHeader?: string;
+    adminTokenHeader?: string;
   }): { c: Context<AppEnv>; jsonMock: ReturnType<typeof vi.fn>; htmlMock: ReturnType<typeof vi.fn>; redirectMock: ReturnType<typeof vi.fn>; setMock: ReturnType<typeof vi.fn> } {
     const headers = new Headers();
     if (options.jwtHeader) {
@@ -147,6 +149,12 @@ describe('createAccessMiddleware', () => {
     }
     if (options.cookies) {
       headers.set('Cookie', options.cookies);
+    }
+    if (options.authHeader) {
+      headers.set('Authorization', options.authHeader);
+    }
+    if (options.adminTokenHeader) {
+      headers.set('X-Admin-Token', options.adminTokenHeader);
     }
 
     const jsonMock = vi.fn().mockReturnValue(new Response());
@@ -189,6 +197,51 @@ describe('createAccessMiddleware', () => {
 
     expect(next).toHaveBeenCalled();
     expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'dev@localhost', name: 'Dev User' });
+  });
+
+  it('allows request when ADMIN_API_TOKEN matches Authorization Bearer token', async () => {
+    const { c, setMock } = createFullMockContext({
+      env: { ADMIN_API_TOKEN: 'secret-token' },
+      authHeader: 'Bearer secret-token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'admin-token@localhost', name: 'Admin Token' });
+  });
+
+  it('allows request when ADMIN_API_TOKEN matches X-Admin-Token header', async () => {
+    const { c, setMock } = createFullMockContext({
+      env: { ADMIN_API_TOKEN: 'secret-token' },
+      adminTokenHeader: 'secret-token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'admin-token@localhost', name: 'Admin Token' });
+  });
+
+  it('returns 401 when ADMIN_API_TOKEN is provided but invalid (and no Access JWT present)', async () => {
+    const { c, jsonMock } = createFullMockContext({
+      env: { ADMIN_API_TOKEN: 'secret-token' },
+      authHeader: 'Bearer wrong-token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'Unauthorized' }),
+      401
+    );
   });
 
   it('returns 500 JSON error when CF Access not configured', async () => {

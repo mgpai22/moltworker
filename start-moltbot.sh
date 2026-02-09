@@ -619,10 +619,9 @@ if (process.env.BW_EMAIL && process.env.BW_PASSWORD) {
 }
 
 // Nia MCP server (knowledge agent for searching indexed repos/docs)
-// NOTE: openclaw@2026.1.29 does not support "mcpServers" as a top-level config key.
-// MCP servers are configured via the gateway's MCP settings, not the config file.
-// The NIA_API_KEY is passed as an env var and written to .env files below
-// so openclaw can pick it up through its env loading chain.
+// We do not configure MCP servers via openclaw.json here.
+// The NIA_API_KEY is passed as an env var and written to .env files below so OpenClaw can
+// pick it up through its env loading chain, regardless of how MCP settings are managed.
 if (process.env.NIA_API_KEY) {
     console.log('NIA_API_KEY available (will be passed via env, not config)');
 }

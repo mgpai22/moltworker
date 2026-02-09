@@ -75,6 +75,7 @@
   // - ANTHROPIC_API_KEY: Your Anthropic API key
   // - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
   // - CF_ACCESS_AUD: Cloudflare Access application audience
+  // - ADMIN_API_TOKEN: (optional) Bearer token for programmatic admin API access (e.g., gateway restart)
   // - TELEGRAM_BOT_TOKEN: (optional) Telegram bot token
   // - DISCORD_BOT_TOKEN: (optional) Discord bot token
   // - SLACK_BOT_TOKEN: (optional) Slack bot token
