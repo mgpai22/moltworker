@@ -4,13 +4,13 @@ Guidelines for AI agents working on this codebase.
 
 ## Project Overview
 
-This is a Cloudflare Worker that runs [Moltbot](https://molt.bot/) in a Cloudflare Sandbox container. It provides:
-- Proxying to the Moltbot gateway (web UI + WebSocket)
+This is a Cloudflare Worker that runs [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot/Clawdbot) in a Cloudflare Sandbox container. It provides:
+- Proxying to the OpenClaw gateway (web UI + WebSocket)
 - Admin UI at `/_admin/` for device management
 - API endpoints at `/api/*` for device pairing
 - Debug endpoints at `/debug/*` for troubleshooting
 
-**Note:** The CLI tool was renamed from `clawdbot` to `openclaw`. CLI commands use `openclaw`, but some internal config paths may still use the old name (e.g., `~/.clawdbot/`).
+**Note:** The CLI tool and npm package are now named `openclaw`. Config files use `.openclaw/openclaw.json`. Legacy `.clawdbot` paths are supported for backward compatibility during transition.
 
 ## Project Structure
 
@@ -23,7 +23,7 @@ src/
 │   ├── jwt.ts        # JWT verification
 │   ├── jwks.ts       # JWKS fetching and caching
 │   └── middleware.ts # Hono middleware for auth
-├── gateway/          # Moltbot gateway management
+├── gateway/          # OpenClaw gateway management
 │   ├── process.ts    # Process lifecycle (find, start)
 │   ├── env.ts        # Environment variable building
 │   ├── r2.ts         # R2 bucket mounting
@@ -43,13 +43,13 @@ src/
 
 ### Environment Variables
 
-- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `CLAWDBOT_DEV_MODE` for container)
+- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `OPENCLAW_DEV_MODE` for container)
 - `DEBUG_ROUTES` - Enables `/debug/*` routes (disabled by default)
 - See `src/types.ts` for full `MoltbotEnv` interface
 
 ### CLI Commands
 
-When calling the openclaw CLI from the worker, always include `--url ws://localhost:18789`:
+When calling the OpenClaw CLI from the worker, always include `--url ws://localhost:18789`:
 ```typescript
 sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789')
 ```
@@ -86,6 +86,7 @@ Current test coverage:
 - `gateway/env.test.ts` - Environment variable building
 - `gateway/process.test.ts` - Process finding logic
 - `gateway/r2.test.ts` - R2 mounting logic
+- `gateway/sync.test.ts` - R2 backup sync logic
 
 When adding new functionality, add corresponding tests.
 
@@ -98,30 +99,10 @@ When adding new functionality, add corresponding tests.
 
 ## Documentation
 
-**Always check `docs/` for detailed guides:**
-
-| File | Description |
-|------|-------------|
-| `docs/SKILLS.md` | How to create and add new skills |
-| `docs/SKILL-ENV-VARS.md` | Environment variables for all skills |
-| `docs/DEPLOYMENT.md` | Deployment and configuration guide |
-
-**Other docs:**
 - `README.md` - User-facing documentation (setup, configuration, usage)
 - `AGENTS.md` - This file, for AI agents
-- `skills/<name>/SKILL.md` - Documentation for each skill
 
 Development documentation goes in AGENTS.md, not README.md.
-
-## Skills
-
-Skills are in `skills/` directory. Each skill has a `SKILL.md` with full documentation.
-
-**Available skills:** agent-browser, bird (Twitter), bitwarden, cloudflare-browser, github, imgbb, nia, obsidian, summarize, whatsapp
-
-**Adding a new skill:** See `docs/SKILLS.md` for the complete guide.
-
-**Skill API keys:** See `docs/SKILL-ENV-VARS.md` for all environment variables.
 
 ---
 
@@ -133,7 +114,7 @@ Browser
    ▼
 ┌─────────────────────────────────────┐
 │     Cloudflare Worker (index.ts)    │
-│  - Starts Moltbot in sandbox        │
+│  - Starts OpenClaw in sandbox       │
 │  - Proxies HTTP/WebSocket requests  │
 │  - Passes secrets as env vars       │
 └──────────────┬──────────────────────┘
@@ -142,7 +123,7 @@ Browser
 ┌─────────────────────────────────────┐
 │     Cloudflare Sandbox Container    │
 │  ┌───────────────────────────────┐  │
-│  │     Moltbot Gateway           │  │
+│  │     OpenClaw Gateway          │  │
 │  │  - Control UI on port 18789   │  │
 │  │  - WebSocket RPC protocol     │  │
 │  │  - Agent runtime              │  │
@@ -155,9 +136,8 @@ Browser
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Worker that manages sandbox lifecycle and proxies requests |
-| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + Moltbot |
-| `start-moltbot.sh` | Startup script that configures moltbot from env vars and launches gateway |
-| `moltbot.json.template` | Default Moltbot configuration template |
+| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + OpenClaw |
+| `start-openclaw.sh` | Startup script: R2 restore → onboard → config patch → launch gateway |
 | `wrangler.jsonc` | Cloudflare Worker + Container configuration |
 
 ## Local Development
@@ -185,19 +165,29 @@ Local development with `wrangler dev` has issues proxying WebSocket connections 
 
 ## Docker Image Caching
 
-The Dockerfile includes a cache bust comment. When changing `moltbot.json.template` or `start-moltbot.sh`, bump the version:
+The Dockerfile includes a cache bust comment. When changing `start-openclaw.sh`, bump the version:
 
 ```dockerfile
-# Build cache bust: 2026-01-26-v10
+# Build cache bust: 2026-02-06-v28-openclaw-upgrade
 ```
 
 ## Gateway Configuration
 
-Moltbot configuration is built at container startup:
+OpenClaw configuration is built at container startup:
 
-1. `moltbot.json.template` is copied to `~/.clawdbot/clawdbot.json` (internal path unchanged)
-2. `start-moltbot.sh` updates the config with values from environment variables
-3. Gateway starts with `--allow-unconfigured` flag (skips onboarding wizard)
+1. R2 backup is restored if available (with migration from legacy `.clawdbot` paths)
+2. If no config exists, `openclaw onboard --non-interactive` creates one based on env vars
+3. `start-openclaw.sh` patches the config for channels, gateway auth, and trusted proxies
+4. Gateway starts with `openclaw gateway --allow-unconfigured --bind lan`
+
+### AI Provider Priority
+
+The startup script selects the auth choice based on which env vars are set:
+
+1. **Cloudflare AI Gateway** (native): `CLOUDFLARE_AI_GATEWAY_API_KEY` + `CF_AI_GATEWAY_ACCOUNT_ID` + `CF_AI_GATEWAY_GATEWAY_ID`
+2. **Direct Anthropic**: `ANTHROPIC_API_KEY` (optionally with `ANTHROPIC_BASE_URL`)
+3. **Direct OpenAI**: `OPENAI_API_KEY`
+4. **Legacy AI Gateway**: `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` (routes through Anthropic base URL)
 
 ### Container Environment Variables
 
@@ -206,7 +196,10 @@ These are the env vars passed TO the container (internal names):
 | Variable | Config Path | Notes |
 |----------|-------------|-------|
 | `ANTHROPIC_API_KEY` | (env var) | OpenClaw reads directly from env |
-| `ANTHROPIC_OAUTH_TOKEN` | (env var) | Alternative to API key (OAuth flow) |
+| `OPENAI_API_KEY` | (env var) | OpenClaw reads directly from env |
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | (env var) | Native AI Gateway key |
+| `CF_AI_GATEWAY_ACCOUNT_ID` | (env var) | Account ID for AI Gateway |
+| `CF_AI_GATEWAY_GATEWAY_ID` | (env var) | Gateway ID for AI Gateway |
 | `OPENCLAW_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
 | `OPENCLAW_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
@@ -214,16 +207,16 @@ These are the env vars passed TO the container (internal names):
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
 
-## Moltbot Config Schema
+## OpenClaw Config Schema
 
-Moltbot has strict config validation. Common gotchas:
+OpenClaw has strict config validation. Common gotchas:
 
 - `agents.defaults.model` must be `{ "primary": "model/name" }` not a string
 - `gateway.mode` must be `"local"` for headless operation
 - No `webchat` channel - the Control UI is served automatically
 - `gateway.bind` is not a config option - use `--bind` CLI flag
 
-See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
+See [OpenClaw docs](https://docs.openclaw.ai/) for full schema.
 
 ## Common Tasks
 
@@ -265,163 +258,4 @@ R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
 
 - **Process status**: The sandbox API's `proc.status` may not update immediately after a process completes. Instead of checking `proc.status === 'completed'`, verify success by checking for expected output (e.g., timestamp file exists after sync).
 
-## Troubleshooting
-
-### Issue: `openclaw: command not found` (or `clawdbot: command not found`)
-
-**Symptom:** CLI commands fail with "command not found" when called from API routes.
-
-**Cause:** The CLI binary name changed from `clawdbot` to `openclaw`. The container image has the new binary, but the worker code is using the old name.
-
-**Solution:**
-1. Update all CLI commands in `src/routes/api.ts` from `clawdbot` to `openclaw`
-2. Verify the container image has `openclaw` installed: `npx wrangler containers list` and check the image
-3. Redeploy: `npm run deploy`
-
----
-
-### Issue: Gateway Token Mismatch ("Invalid or missing token")
-
-**Symptom:**
-- Gateway logs show `disconnected (1008): Invalid or missing token`
-- CLI commands timeout or fail with authentication errors
-- Web UI shows "Invalid or missing token"
-
-**Cause:** The `start-moltbot.sh` script generates a **random token** if `OPENCLAW_GATEWAY_TOKEN` is not set:
-```bash
-OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$(openssl rand -hex 16)}"
-```
-
-The worker passes `MOLTBOT_GATEWAY_TOKEN` to the container as `OPENCLAW_GATEWAY_TOKEN`. If the wrong secret name is used or the secret is missing, the gateway starts with a random token that nothing else knows.
-
-**Solution:**
-1. Set the correct secret name: `npx wrangler secret put MOLTBOT_GATEWAY_TOKEN`
-2. Use a stable token value (save it in `.secrets.prod` for reference)
-3. Full reset may be required if gateway already started with wrong token (see "Zombie Processes" below)
-
-**Verification:**
-```bash
-# Check what secrets are set
-npx wrangler secret list
-
-# Should show MOLTBOT_GATEWAY_TOKEN (not OPENCLAW_GATEWAY_TOKEN)
-```
-
----
-
-### Issue: Anthropic API Returns HTTP 403 Forbidden
-
-**Symptom:** Bot responds with "HTTP 403: forbidden: Request not allowed" when trying to use Claude.
-
-**Cause:** The Anthropic OAuth token (`ANTHROPIC_OAUTH_TOKEN`) is expired or invalid.
-
-**Solution:**
-1. Get a fresh OAuth token from Anthropic (console.anthropic.com → OAuth tokens)
-2. Update the secret: `npx wrangler secret put ANTHROPIC_OAUTH_TOKEN`
-3. Restart the gateway (see "Restarting the Gateway" below)
-
-**Note:** OAuth tokens have expiration dates. If the bot suddenly stops working after a period of functioning correctly, check token expiration first.
-
----
-
-### Issue: Zombie Processes / Stuck Sandbox State
-
-**Symptom:**
-- Multiple `start-moltbot.sh` processes stuck in "running" state
-- `/debug/processes` shows 10+ processes that never complete
-- Gateway doesn't start despite correct configuration
-- CLI commands hang indefinitely
-
-**Cause:** The Cloudflare Sandbox Durable Object maintains persistent state. When gateway processes fail mid-startup, tokens change while processes are running, or the container crashes, the sandbox can get into an inconsistent state where:
-- Old process references are cached but processes are dead
-- Multiple startup attempts queue up
-- The gateway port (18789) is already bound by a zombie process
-
-**Solution - Full Reset:**
-```bash
-# 1. Get the container ID
-npx wrangler containers list
-# Look for the "id" field
-
-# 2. Delete the container
-npx wrangler containers delete <container-id>
-
-# 3. Delete the worker (this clears Durable Object state)
-npx wrangler delete moltbot-sandbox --force
-
-# 4. Redeploy
-npm run deploy
-
-# 5. Re-set all secrets (they were deleted with the worker)
-echo "your-gateway-token" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
-echo "your-discord-token" | npx wrangler secret put DISCORD_BOT_TOKEN
-echo "your-anthropic-token" | npx wrangler secret put ANTHROPIC_OAUTH_TOKEN
-echo "your-team-domain" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
-echo "your-aud" | npx wrangler secret put CF_ACCESS_AUD
-echo "open" | npx wrangler secret put DISCORD_DM_POLICY
-echo "true" | npx wrangler secret put DEBUG_ROUTES
-```
-
-**Prevention:**
-- Always use stable, saved tokens (store in `.secrets.prod`)
-- Don't change secrets while the gateway is running without restarting
-- If something seems stuck, do a full reset early rather than trying to debug
-
----
-
-### Issue: CF Access Protecting All Routes
-
-**Symptom:** Even "public" routes like `/sandbox-health` or `/debug/*` return 302 redirects to CF Access login.
-
-**Cause:** Cloudflare Access is configured at the **Cloudflare dashboard level** for the entire worker domain. The worker's internal route middleware never runs because CF Access intercepts all requests at the edge first.
-
-**Solution:** This is expected behavior. The worker-level "public routes" are only public relative to the worker's own auth middleware, not to CF Access.
-
-**Note:** Discord/Telegram/etc. bot functionality is NOT affected because those connections are **outbound** from the container to the messaging platform's servers - they don't go through the worker's HTTP interface.
-
----
-
-### Issue: Pairing Code Not Found in Devices List
-
-**Symptom:** User sends pairing code via Discord DM, but the code doesn't appear when calling `/api/admin/devices`.
-
-**Cause:** Device pairing and channel pairing are **different CLI commands**:
-- `openclaw devices list` - Lists device/OAuth pairing requests
-- `openclaw pairing list <channel>` - Lists channel-specific pairing codes (Discord, Telegram, etc.)
-
-**Solution:** Use the correct endpoint:
-- For Discord pairing codes: `GET /api/admin/pairing/discord`
-- For approving: `POST /api/admin/pairing/discord/<code>/approve`
-
----
-
-### Restarting the Gateway
-
-If you need to restart the gateway without a full reset:
-
-**Option 1: API endpoint (requires CF Access auth)**
-```bash
-curl -X POST https://your-worker.workers.dev/api/admin/gateway/restart \
-  -H "Cookie: CF_Authorization=<your-jwt>"
-```
-
-**Option 2: Trigger via any request**
-The gateway auto-starts on first request. If it's stuck, a full reset is usually needed.
-
----
-
-### Required Secrets Checklist
-
-When deploying fresh or after a reset, these secrets must be set:
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `MOLTBOT_GATEWAY_TOKEN` | Yes | Token for CLI ↔ gateway auth |
-| `DISCORD_BOT_TOKEN` | If using Discord | Discord bot token |
-| `ANTHROPIC_OAUTH_TOKEN` | Yes (or API key) | Claude API authentication |
-| `CF_ACCESS_TEAM_DOMAIN` | If using CF Access | e.g., `myteam.cloudflareaccess.com` |
-| `CF_ACCESS_AUD` | If using CF Access | Application audience tag |
-| `DISCORD_DM_POLICY` | Optional | `open` (no pairing) or `pairing` (default) |
-| `DEBUG_ROUTES` | Optional | `true` to enable `/debug/*` |
-
-**Tip:** Keep a `.secrets.prod` file (gitignored) with all production secret values for easy reference during resets.
+- **R2 prefix migration**: Backups are now stored under `openclaw/` prefix in R2 (was `clawdbot/`). The startup script handles restoring from both old and new prefixes with automatic migration.

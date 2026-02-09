@@ -1,89 +1,54 @@
 import type { MoltbotEnv } from '../types';
 
 /**
- * Build environment variables to pass to the Moltbot container process
- * 
+ * Build environment variables to pass to the OpenClaw container process
+ *
  * @param env - Worker environment bindings
  * @returns Environment variables record
  */
 export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   const envVars: Record<string, string> = {};
 
-  // Normalize the base URL by removing trailing slashes
-  const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL?.replace(/\/+$/, '');
-  const isOpenAIGateway = normalizedBaseUrl?.endsWith('/openai');
-
-  // If key in request (user provided ANTHROPIC_API_KEY) pass ANTHROPIC_API_KEY as is
-  if (env.ANTHROPIC_API_KEY) {
-    envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  // Cloudflare AI Gateway configuration (new native provider)
+  if (env.CLOUDFLARE_AI_GATEWAY_API_KEY) {
+    envVars.CLOUDFLARE_AI_GATEWAY_API_KEY = env.CLOUDFLARE_AI_GATEWAY_API_KEY;
   }
-  if (env.ANTHROPIC_OAUTH_TOKEN) {
-    envVars.ANTHROPIC_OAUTH_TOKEN = env.ANTHROPIC_OAUTH_TOKEN;
+  if (env.CF_AI_GATEWAY_ACCOUNT_ID) {
+    envVars.CF_AI_GATEWAY_ACCOUNT_ID = env.CF_AI_GATEWAY_ACCOUNT_ID;
   }
-  if (env.OPENAI_API_KEY) {
-    envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+  if (env.CF_AI_GATEWAY_GATEWAY_ID) {
+    envVars.CF_AI_GATEWAY_GATEWAY_ID = env.CF_AI_GATEWAY_GATEWAY_ID;
   }
 
-  // AI Gateway will use auth token from either provider specific headers (x-api-key, Authorization) or cf-aig-authorization header
-  // If the user wants to use AI Gateway (authenticated):
-  // 1. If Anthropic/OpenAI key is not passed directly (stored with BYOK or if Unified Billing is used), pass AI_GATEWAY_API_KEY in vendor specific header
-  // 2. If key is passed directly pass AI_GATEWAY_API_KEY in cf-aig-authorization header
-  if (env.AI_GATEWAY_API_KEY) {
-    if (isOpenAIGateway && !envVars.OPENAI_API_KEY) {
-      envVars.OPENAI_API_KEY = env.AI_GATEWAY_API_KEY;
-    } else if (!envVars.ANTHROPIC_API_KEY && !envVars.ANTHROPIC_OAUTH_TOKEN) {
-      envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
-    } else {
-      envVars.AI_GATEWAY_API_KEY = env.AI_GATEWAY_API_KEY;
-    }
-  }
+  // Direct provider keys
+  if (env.ANTHROPIC_API_KEY) envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  if (env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
 
-  // Pass base URL (used by start-moltbot.sh to determine provider)
-  if (normalizedBaseUrl) {
+  // Legacy AI Gateway support: AI_GATEWAY_BASE_URL + AI_GATEWAY_API_KEY
+  // When set, these override direct keys for backward compatibility
+  if (env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL) {
+    const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL.replace(/\/+$/, '');
     envVars.AI_GATEWAY_BASE_URL = normalizedBaseUrl;
-    // Also set the provider-specific base URL env var
-    if (isOpenAIGateway) {
-      envVars.OPENAI_BASE_URL = normalizedBaseUrl;
-    } else {
-      envVars.ANTHROPIC_BASE_URL = normalizedBaseUrl;
-    }
+    // Legacy path routes through Anthropic base URL
+    envVars.ANTHROPIC_BASE_URL = normalizedBaseUrl;
+    envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
   }
-  // Map Worker env vars to OPENCLAW_* for container
+
+  // Map MOLTBOT_GATEWAY_TOKEN to OPENCLAW_GATEWAY_TOKEN (container expects this name)
   if (env.MOLTBOT_GATEWAY_TOKEN) envVars.OPENCLAW_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
   if (env.DEV_MODE) envVars.OPENCLAW_DEV_MODE = env.DEV_MODE;
-  if (env.OPENCLAW_BIND_MODE) envVars.OPENCLAW_BIND_MODE = env.OPENCLAW_BIND_MODE;
   if (env.TELEGRAM_BOT_TOKEN) envVars.TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
   if (env.TELEGRAM_DM_POLICY) envVars.TELEGRAM_DM_POLICY = env.TELEGRAM_DM_POLICY;
   if (env.DISCORD_BOT_TOKEN) envVars.DISCORD_BOT_TOKEN = env.DISCORD_BOT_TOKEN;
   if (env.DISCORD_DM_POLICY) envVars.DISCORD_DM_POLICY = env.DISCORD_DM_POLICY;
-  if (env.DISCORD_ALLOWED_USERS) envVars.DISCORD_ALLOWED_USERS = env.DISCORD_ALLOWED_USERS;
   if (env.SLACK_BOT_TOKEN) envVars.SLACK_BOT_TOKEN = env.SLACK_BOT_TOKEN;
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
+  if (env.CF_AI_GATEWAY_MODEL) envVars.CF_AI_GATEWAY_MODEL = env.CF_AI_GATEWAY_MODEL;
+  if (env.CF_ACCOUNT_ID) envVars.CF_ACCOUNT_ID = env.CF_ACCOUNT_ID;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
-
-  // Skill API keys
-  if (env.GOOGLE_PLACES_API_KEY) envVars.GOOGLE_PLACES_API_KEY = env.GOOGLE_PLACES_API_KEY;
-  if (env.AUTH_TOKEN) envVars.AUTH_TOKEN = env.AUTH_TOKEN;
-  if (env.CT0) envVars.CT0 = env.CT0;
-  if (env.GH_TOKEN) envVars.GH_TOKEN = env.GH_TOKEN;
-  if (env.NIA_API_KEY) envVars.NIA_API_KEY = env.NIA_API_KEY;
-  if (env.IMGBB_API_KEY) envVars.IMGBB_API_KEY = env.IMGBB_API_KEY;
-  if (env.GEMINI_API_KEY) envVars.GEMINI_API_KEY = env.GEMINI_API_KEY;
-  if (env.GOOGLE_API_KEY) envVars.GOOGLE_API_KEY = env.GOOGLE_API_KEY;
-  if (env.GOOGLE_APPLICATION_CREDENTIALS) envVars.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (env.GOOGLE_CLOUD_PROJECT) envVars.GOOGLE_CLOUD_PROJECT = env.GOOGLE_CLOUD_PROJECT;
-  if (env.GOOGLE_CLOUD_LOCATION) envVars.GOOGLE_CLOUD_LOCATION = env.GOOGLE_CLOUD_LOCATION;
-  if (env.GOOGLE_GENAI_USE_VERTEXAI) envVars.GOOGLE_GENAI_USE_VERTEXAI = env.GOOGLE_GENAI_USE_VERTEXAI;
-  if (env.OBSIDIAN_API_URL) envVars.OBSIDIAN_API_URL = env.OBSIDIAN_API_URL;
-  if (env.OBSIDIAN_API_KEY) envVars.OBSIDIAN_API_KEY = env.OBSIDIAN_API_KEY;
-  if (env.BW_EMAIL) envVars.BW_EMAIL = env.BW_EMAIL;
-  if (env.BW_PASSWORD) envVars.BW_PASSWORD = env.BW_PASSWORD;
-  // Summarize skill (optional)
-  if (env.GEMINI_API_KEY) envVars.GEMINI_API_KEY = env.GEMINI_API_KEY;
-  if (env.OPENROUTER_API_KEY) envVars.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
 
   return envVars;
 }

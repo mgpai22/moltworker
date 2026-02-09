@@ -7,18 +7,20 @@ export interface MoltbotEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;
   ASSETS: Fetcher; // Assets binding for admin UI static files
   MOLTBOT_BUCKET: R2Bucket; // R2 bucket for persistent storage
-  // AI Gateway configuration (preferred)
+  // Cloudflare AI Gateway configuration (preferred)
+  CF_AI_GATEWAY_ACCOUNT_ID?: string; // Cloudflare account ID for AI Gateway
+  CF_AI_GATEWAY_GATEWAY_ID?: string; // AI Gateway ID
+  CLOUDFLARE_AI_GATEWAY_API_KEY?: string; // API key for requests through the gateway
+  CF_AI_GATEWAY_MODEL?: string; // Override model: "provider/model-id" e.g. "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+  // Legacy AI Gateway configuration (still supported for backward compat)
   AI_GATEWAY_API_KEY?: string; // API key for the provider configured in AI Gateway
   AI_GATEWAY_BASE_URL?: string; // AI Gateway URL (e.g., https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic)
-  // Legacy direct provider configuration (fallback)
+  // Direct provider configuration
   ANTHROPIC_API_KEY?: string;
-  ANTHROPIC_OAUTH_TOKEN?: string;
   ANTHROPIC_BASE_URL?: string;
   OPENAI_API_KEY?: string;
   MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to OPENCLAW_GATEWAY_TOKEN for container)
-
-  OPENCLAW_BIND_MODE?: string;
-  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + moltbot device pairing)
+  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + openclaw device pairing)
   E2E_TEST_MODE?: string; // Set to 'true' for E2E tests (skips CF Access auth but keeps device pairing)
   DEBUG_ROUTES?: string; // Set to 'true' to enable /debug/* routes
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
@@ -26,7 +28,6 @@ export interface MoltbotEnv {
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
-  DISCORD_ALLOWED_USERS?: string; // Comma-separated Discord user IDs to permanently whitelist
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
   // Cloudflare Access configuration for admin routes
@@ -41,27 +42,6 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
-  // Skill API keys
-  GOOGLE_PLACES_API_KEY?: string; // GoPlaces skill
-  AUTH_TOKEN?: string; // Bird skill (Twitter)
-  CT0?: string; // Bird skill (Twitter)
-  GH_TOKEN?: string; // GitHub skill
-  NIA_API_KEY?: string; // Nia skill
-  IMGBB_API_KEY?: string; // ImgBB uploads
-  GEMINI_API_KEY?: string; // Gemini CLI (AI Studio)
-  GOOGLE_API_KEY?: string; // Vertex AI API key for Gemini CLI
-  GOOGLE_APPLICATION_CREDENTIALS?: string; // Vertex AI service account JSON path
-  GOOGLE_CLOUD_PROJECT?: string; // GCP project for Gemini/Vertex
-  GOOGLE_CLOUD_LOCATION?: string; // GCP location for Vertex
-  GOOGLE_GENAI_USE_VERTEXAI?: string; // Route Gemini CLI via Vertex AI
-  OBSIDIAN_API_URL?: string; // Obsidian skill
-  OBSIDIAN_API_KEY?: string; // Obsidian skill
-  BW_EMAIL?: string; // Bitwarden skill
-  BW_PASSWORD?: string; // Bitwarden skill
-  // Summarize skill (optional - uses ANTHROPIC_API_KEY by default)
-  OPENROUTER_API_KEY?: string; // OpenRouter free models for summarize
-  // WhatsApp skill (wacli) - session stored in R2, restored via /api/admin/wacli/restore
-  // Upload session to R2 with: wrangler r2 object put moltbot-data/wacli/session.db --file ~/.wacli/session.db
 }
 
 /**

@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
+import {
+  ensureMoltbotGateway,
+  findExistingMoltbotProcess,
+  mountR2Storage,
+  syncToR2,
+  waitForProcess,
+} from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
@@ -10,7 +16,7 @@ const CLI_TIMEOUT_MS = 20000;
 /**
  * API routes
  * - /api/admin/* - Protected admin API routes (Cloudflare Access required)
- * 
+ *
  * Note: /api/status is now handled by publicRoutes (no auth required)
  */
 const api = new Hono<AppEnv>();
@@ -31,9 +37,13 @@ adminApi.get('/devices', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run openclaw CLI to list devices
-    // Must specify --url to connect to the gateway running in the same container
-    const proc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
+    // Run OpenClaw CLI to list devices
+    // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    const proc = await sandbox.startProcess(
+      `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+    );
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -84,8 +94,12 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run openclaw CLI to approve the device
-    const proc = await sandbox.startProcess(`openclaw devices approve ${requestId} --url ws://localhost:18789`);
+    // Run OpenClaw CLI to approve the device
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    const proc = await sandbox.startProcess(
+      `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
+    );
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -117,7 +131,11 @@ adminApi.post('/devices/approve-all', async (c) => {
     await ensureMoltbotGateway(sandbox, c.env);
 
     // First, get the list of pending devices
-    const listProc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    const listProc = await sandbox.startProcess(
+      `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+    );
     await waitForProcess(listProc, CLI_TIMEOUT_MS);
 
     const listLogs = await listProc.getLogs();
@@ -144,11 +162,17 @@ adminApi.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
-        const approveProc = await sandbox.startProcess(`openclaw devices approve ${device.requestId} --url ws://localhost:18789`);
+        // eslint-disable-next-line no-await-in-loop -- sequential device approval required
+        const approveProc = await sandbox.startProcess(
+          `openclaw devices approve ${device.requestId} --url ws://localhost:18789${tokenArg}`,
+        );
+        // eslint-disable-next-line no-await-in-loop
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
+        // eslint-disable-next-line no-await-in-loop
         const approveLogs = await approveProc.getLogs();
-        const success = approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
+        const success =
+          approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
 
         results.push({ requestId: device.requestId, success });
       } catch (err) {
@@ -160,89 +184,11 @@ adminApi.post('/devices/approve-all', async (c) => {
       }
     }
 
-    const approvedCount = results.filter(r => r.success).length;
+    const approvedCount = results.filter((r) => r.success).length;
     return c.json({
-      approved: results.filter(r => r.success).map(r => r.requestId),
-      failed: results.filter(r => !r.success),
+      approved: results.filter((r) => r.success).map((r) => r.requestId),
+      failed: results.filter((r) => !r.success),
       message: `Approved ${approvedCount} of ${pending.length} device(s)`,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
-  }
-});
-
-// GET /api/admin/pairing/:channel - List pending pairing requests for a channel
-adminApi.get('/pairing/:channel', async (c) => {
-  const sandbox = c.get('sandbox');
-  const channel = c.req.param('channel');
-
-  const validChannels = ['discord', 'telegram', 'slack', 'whatsapp', 'signal', 'imessage'];
-  if (!validChannels.includes(channel)) {
-    return c.json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` }, 400);
-  }
-
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-
-    const proc = await sandbox.startProcess(`openclaw pairing list ${channel} --json --url ws://localhost:18789`);
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
-
-    try {
-      // Find JSON array or object in output
-      const jsonMatch = stdout.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[0]);
-        return c.json({ channel, pending: Array.isArray(data) ? data : [data] });
-      }
-      return c.json({ channel, pending: [], raw: stdout, stderr });
-    } catch {
-      return c.json({ channel, pending: [], raw: stdout, stderr, parseError: 'Failed to parse CLI output' });
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
-  }
-});
-
-// POST /api/admin/pairing/:channel/:code/approve - Approve a pairing code
-adminApi.post('/pairing/:channel/:code/approve', async (c) => {
-  const sandbox = c.get('sandbox');
-  const channel = c.req.param('channel');
-  const code = c.req.param('code');
-
-  const validChannels = ['discord', 'telegram', 'slack', 'whatsapp', 'signal', 'imessage'];
-  if (!validChannels.includes(channel)) {
-    return c.json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` }, 400);
-  }
-
-  if (!code || code.length < 4) {
-    return c.json({ error: 'Valid pairing code is required' }, 400);
-  }
-
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-
-    const proc = await sandbox.startProcess(`openclaw pairing approve ${channel} ${code} --notify`);
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
-
-    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
-
-    return c.json({
-      success,
-      channel,
-      code,
-      message: success ? 'Pairing approved' : 'Approval may have failed',
-      stdout,
-      stderr,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -254,8 +200,8 @@ adminApi.post('/pairing/:channel/:code/approve', async (c) => {
 adminApi.get('/storage', async (c) => {
   const sandbox = c.get('sandbox');
   const hasCredentials = !!(
-    c.env.R2_ACCESS_KEY_ID && 
-    c.env.R2_SECRET_ACCESS_KEY && 
+    c.env.R2_ACCESS_KEY_ID &&
+    c.env.R2_SECRET_ACCESS_KEY &&
     c.env.CF_ACCOUNT_ID
   );
 
@@ -272,9 +218,11 @@ adminApi.get('/storage', async (c) => {
     try {
       // Mount R2 if not already mounted
       await mountR2Storage(sandbox, c.env);
-      
+
       // Check for sync marker file
-      const proc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync 2>/dev/null || echo ""`);
+      const proc = await sandbox.startProcess(
+        `cat ${R2_MOUNT_PATH}/.last-sync 2>/dev/null || echo ""`,
+      );
       await waitForProcess(proc, 5000);
       const logs = await proc.getLogs();
       const timestamp = logs.stdout?.trim();
@@ -290,7 +238,7 @@ adminApi.get('/storage', async (c) => {
     configured: hasCredentials,
     missing: missing.length > 0 ? missing : undefined,
     lastSync,
-    message: hasCredentials 
+    message: hasCredentials
       ? 'R2 storage is configured. Your data will persist across container restarts.'
       : 'R2 storage is not configured. Paired devices and conversations will be lost when the container restarts.',
   });
@@ -299,9 +247,9 @@ adminApi.get('/storage', async (c) => {
 // POST /api/admin/storage/sync - Trigger a manual sync to R2
 adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   const result = await syncToR2(sandbox, c.env);
-  
+
   if (result.success) {
     return c.json({
       success: true,
@@ -310,118 +258,14 @@ adminApi.post('/storage/sync', async (c) => {
     });
   } else {
     const status = result.error?.includes('not configured') ? 400 : 500;
-    return c.json({
-      success: false,
-      error: result.error,
-      details: result.details,
-    }, status);
-  }
-});
-
-// POST /api/admin/wacli/restore - Restore wacli session from R2
-// Upload to R2 first with: wrangler r2 object put moltbot-data/wacli/session.db --file ~/.wacli/session.db
-adminApi.post('/wacli/restore', async (c) => {
-  const sandbox = c.get('sandbox');
-
-  try {
-    // Mount R2 if needed
-    await mountR2Storage(sandbox, c.env);
-
-    // Remove existing local wacli dir and recreate
-    const rmProc = await sandbox.startProcess('rm -rf /root/.wacli && mkdir -p /root/.wacli');
-    await waitForProcess(rmProc, 10000);
-
-    // Check R2 file sizes first
-    const r2SizeProc = await sandbox.startProcess(`stat -c '%s' ${R2_MOUNT_PATH}/wacli/session.db ${R2_MOUNT_PATH}/wacli/wacli.db 2>&1`);
-    await waitForProcess(r2SizeProc, 10000);
-    const r2SizeLogs = await r2SizeProc.getLogs();
-
-    // Use rsync instead of cp - handles mounted filesystems better
-    // --progress shows transfer progress, --checksum verifies file integrity
-    const copyProc = await sandbox.startProcess(`rsync -av --progress ${R2_MOUNT_PATH}/wacli/ /root/.wacli/ 2>&1`);
-    await waitForProcess(copyProc, 60000); // Longer timeout for large files
-    const copyLogs = await copyProc.getLogs();
-
-    // Verify sizes match
-    const localSizeProc = await sandbox.startProcess(`stat -c '%s' /root/.wacli/session.db /root/.wacli/wacli.db 2>&1`);
-    await waitForProcess(localSizeProc, 10000);
-    const localSizeLogs = await localSizeProc.getLogs();
-
-    // Check wacli status
-    const statusProc = await sandbox.startProcess('wacli auth status 2>&1');
-    await waitForProcess(statusProc, 15000);
-    const statusLogs = await statusProc.getLogs();
-
-    return c.json({
-      success: true,
-      r2_sizes: r2SizeLogs.stdout,
-      rsync_output: copyLogs.stdout,
-      local_sizes: localSizeLogs.stdout,
-      wacli_status: statusLogs.stdout,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
-  }
-});
-
-// GET /api/admin/wacli/debug - Debug wacli session files
-adminApi.get('/wacli/debug', async (c) => {
-  const sandbox = c.get('sandbox');
-
-  try {
-    // Check R2 mount
-    const r2Proc = await sandbox.startProcess(`ls -la ${R2_MOUNT_PATH}/wacli/ 2>&1 || echo "R2 wacli dir not found"`);
-    await waitForProcess(r2Proc, 10000);
-    const r2Logs = await r2Proc.getLogs();
-
-    // Check local wacli dir
-    const localProc = await sandbox.startProcess('ls -la /root/.wacli/ 2>&1 || echo "Local wacli dir not found"');
-    await waitForProcess(localProc, 10000);
-    const localLogs = await localProc.getLogs();
-
-    // Check R2 mount status
-    const mountProc = await sandbox.startProcess('mount | grep s3fs || echo "No s3fs mount found"');
-    await waitForProcess(mountProc, 10000);
-    const mountLogs = await mountProc.getLogs();
-
-    return c.json({
-      r2_wacli: r2Logs.stdout,
-      local_wacli: localLogs.stdout,
-      s3fs_mount: mountLogs.stdout,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
-  }
-});
-
-// GET /api/admin/wacli/status - Check wacli auth status
-adminApi.get('/wacli/status', async (c) => {
-  const sandbox = c.get('sandbox');
-
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-
-    const proc = await sandbox.startProcess('wacli auth status');
-    await waitForProcess(proc, 10000);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
-
-    const authenticated = stdout.toLowerCase().includes('authenticated') ||
-                          stdout.toLowerCase().includes('logged in') ||
-                          !stdout.toLowerCase().includes('not authenticated');
-
-    return c.json({
-      authenticated,
-      stdout,
-      stderr,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
+    return c.json(
+      {
+        success: false,
+        error: result.error,
+        details: result.details,
+      },
+      status,
+    );
   }
 });
 
@@ -432,7 +276,7 @@ adminApi.post('/gateway/restart', async (c) => {
   try {
     // Find and kill the existing gateway process
     const existingProcess = await findExistingMoltbotProcess(sandbox);
-    
+
     if (existingProcess) {
       console.log('Killing existing gateway process:', existingProcess.id);
       try {
@@ -441,7 +285,7 @@ adminApi.post('/gateway/restart', async (c) => {
         console.error('Error killing process:', killErr);
       }
       // Wait a moment for the process to die
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
 
     // Start a new gateway in the background
@@ -452,7 +296,7 @@ adminApi.post('/gateway/restart', async (c) => {
 
     return c.json({
       success: true,
-      message: existingProcess 
+      message: existingProcess
         ? 'Gateway process killed, new instance starting...'
         : 'No existing process found, starting new instance...',
       previousProcessId: existingProcess?.id,
