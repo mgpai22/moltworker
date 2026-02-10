@@ -9,12 +9,58 @@ import { findExistingMoltbotProcess } from '../gateway';
  */
 const debug = new Hono<AppEnv>();
 
+const SENSITIVE_KEY_PATTERN = /secret|token|key|password|credential/i;
+
+function redactSecretsDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactSecretsDeep);
+  }
+
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (SENSITIVE_KEY_PATTERN.test(key)) {
+        out[key] = '[REDACTED]';
+        continue;
+      }
+      out[key] = redactSecretsDeep(child);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function redactSecretsInText(text: string): string {
+  if (!text) return text;
+
+  let out = text;
+
+  // Redact JSON-like key/value pairs e.g. `"token": "..."`, `"apiKey": "..."`.
+  out = out.replace(
+    /("[^"]*(?:secret|token|key|password|credential|apikey|api_key)[^"]*"\s*:\s*")([^"]*)(")/gi,
+    '$1[REDACTED]$3',
+  );
+
+  // Redact env-file style secrets e.g. `DISCORD_BOT_TOKEN=...`
+  out = out.replace(
+    /(^|\n)([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|KEY|AUTH|CREDENTIAL)[A-Z0-9_]*)=([^\n]*)/g,
+    '$1$2=[REDACTED]',
+  );
+
+  // Common token formats
+  out = out.replace(/github_pat_[A-Za-z0-9_]+/g, 'github_pat_[REDACTED]');
+  out = out.replace(/eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*/g, 'eyJ[REDACTED].[REDACTED].[REDACTED]');
+
+  return out;
+}
+
 // GET /debug/version - Returns version info from inside the container
 debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
-    // Get moltbot version (CLI is still named clawdbot until upstream renames)
-    const versionProcess = await sandbox.startProcess('clawdbot --version');
+    // Get openclaw version
+    const versionProcess = await sandbox.startProcess('openclaw --version');
     await new Promise(resolve => setTimeout(resolve, 500));
     const versionLogs = await versionProcess.getLogs();
     const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
@@ -55,8 +101,8 @@ debug.get('/processes', async (c) => {
       if (includeLogs) {
         try {
           const logs = await p.getLogs();
-          data.stdout = logs.stdout || '';
-          data.stderr = logs.stderr || '';
+          data.stdout = redactSecretsInText(logs.stdout || '');
+          data.stderr = redactSecretsInText(logs.stderr || '');
         } catch {
           data.logs_error = 'Failed to retrieve logs';
         }
@@ -123,10 +169,10 @@ debug.get('/gateway-api', async (c) => {
   }
 });
 
-// GET /debug/cli - Test moltbot CLI commands (CLI is still named clawdbot)
+// GET /debug/cli - Test openclaw CLI commands
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'clawdbot --help';
+  const cmd = c.req.query('cmd') || 'openclaw --help';
   
   try {
     const proc = await sandbox.startProcess(cmd);
@@ -145,8 +191,8 @@ debug.get('/cli', async (c) => {
       status: proc.status,
       exitCode: proc.exitCode,
       attempts,
-      stdout: logs.stdout || '',
-      stderr: logs.stderr || '',
+      stdout: redactSecretsInText(logs.stdout || ''),
+      stderr: redactSecretsInText(logs.stderr || ''),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -189,8 +235,8 @@ debug.get('/logs', async (c) => {
       status: 'ok',
       process_id: process.id,
       process_status: process.status,
-      stdout: logs.stdout || '',
-      stderr: logs.stderr || '',
+      stdout: redactSecretsInText(logs.stdout || ''),
+      stderr: redactSecretsInText(logs.stderr || ''),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -379,6 +425,10 @@ debug.get('/container-config', async (c) => {
       config = JSON.parse(stdout);
     } catch {
       // Not valid JSON
+    }
+
+    if (config) {
+      config = redactSecretsDeep(config);
     }
     
     return c.json({
