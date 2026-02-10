@@ -6,7 +6,7 @@ import { mountR2Storage } from '../gateway/r2';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
- * 
+ *
  * These routes are mounted BEFORE the auth middleware is applied.
  * Includes: health checks, static assets, and public API endpoints.
  */
@@ -55,7 +55,11 @@ publicRoutes.get('/api/status', async (c) => {
       try {
         await sandbox.destroy();
         lastGatewayStartTime = 0; // Reset cooldown
-        return c.json({ ok: true, status: 'reset', message: 'Container destroyed. Next request will create a fresh container.' });
+        return c.json({
+          ok: true,
+          status: 'reset',
+          message: 'Container destroyed. Next request will create a fresh container.',
+        });
       } catch (err) {
         console.error('[status] Failed to destroy container:', err);
         return c.json({ ok: false, status: 'error', error: 'Failed to reset container' }, 500);
@@ -75,11 +79,12 @@ publicRoutes.get('/api/status', async (c) => {
         timeoutId = setTimeout(() => reject(new Error('timeout')), 3000);
       });
 
-      const resp = await Promise.race([sandbox.containerFetch(healthReq, MOLTBOT_PORT), timeout]).finally(
-        () => {
-          if (timeoutId) clearTimeout(timeoutId);
-        },
-      );
+      const resp = await Promise.race([
+        sandbox.containerFetch(healthReq, MOLTBOT_PORT),
+        timeout,
+      ]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
       if (resp.status < 500) {
         console.log('[status] Port up! status:', resp.status);
         return c.json({ ok: true, status: 'running' });
@@ -92,7 +97,11 @@ publicRoutes.get('/api/status', async (c) => {
     const now = Date.now();
     const cooldownRemaining = GATEWAY_START_COOLDOWN_MS - (now - lastGatewayStartTime);
     if (cooldownRemaining > 0) {
-      console.log('[status] Cooldown active, remaining:', Math.round(cooldownRemaining / 1000), 's');
+      console.log(
+        '[status] Cooldown active, remaining:',
+        Math.round(cooldownRemaining / 1000),
+        's',
+      );
       return c.json({ ok: false, status: 'starting' });
     }
 
@@ -137,7 +146,11 @@ publicRoutes.get('/api/status', async (c) => {
     }
     return c.json({ ok: false, status: 'starting' });
   } catch (err) {
-    return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
+    return c.json({
+      ok: false,
+      status: 'error',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 });
 

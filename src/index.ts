@@ -85,9 +85,7 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   const hasGatewayKey = !!env.AI_GATEWAY_API_KEY;
 
   if (!hasAnthropicKey && !hasAnthropicOAuth && !hasOpenAIKey && !hasGatewayKey) {
-    missing.push(
-      'ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, OPENAI_API_KEY, or AI_GATEWAY_API_KEY',
-    );
+    missing.push('ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, OPENAI_API_KEY, or AI_GATEWAY_API_KEY');
   }
 
   return missing;
@@ -265,8 +263,14 @@ app.all('*', async (c) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY && !c.env.ANTHROPIC_OAUTH_TOKEN && !c.env.OPENAI_API_KEY && !c.env.AI_GATEWAY_API_KEY) {
-      hint = 'No AI provider key is set. Run: wrangler secret put ANTHROPIC_API_KEY (or ANTHROPIC_OAUTH_TOKEN)';
+    if (
+      !c.env.ANTHROPIC_API_KEY &&
+      !c.env.ANTHROPIC_OAUTH_TOKEN &&
+      !c.env.OPENAI_API_KEY &&
+      !c.env.AI_GATEWAY_API_KEY
+    ) {
+      hint =
+        'No AI provider key is set. Run: wrangler secret put ANTHROPIC_API_KEY (or ANTHROPIC_OAUTH_TOKEN)';
     } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
       hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
     }

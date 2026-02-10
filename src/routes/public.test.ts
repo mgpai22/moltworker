@@ -5,10 +5,10 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from '../types';
 import { publicRoutes } from './public';
 
-function createTestApp(options: {
-  env: Partial<MoltbotEnv>;
-  sandbox: Record<string, unknown>;
-}): { app: Hono<AppEnv>; env: MoltbotEnv } {
+function createTestApp(options: { env: Partial<MoltbotEnv>; sandbox: Record<string, unknown> }): {
+  app: Hono<AppEnv>;
+  env: MoltbotEnv;
+} {
   const app = new Hono<AppEnv>();
 
   // Minimal env bindings for Hono/Worker-style fetch().

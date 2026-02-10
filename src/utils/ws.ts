@@ -54,4 +54,3 @@ export function injectGatewayTokenIntoConnectRequest(
   const nextMsg: JsonObject = { ...msg, params: nextParams };
   return JSON.stringify(nextMsg);
 }
-

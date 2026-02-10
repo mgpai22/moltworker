@@ -2,7 +2,7 @@ import type { MoltbotEnv } from '../types';
 
 /**
  * Build environment variables to pass to the Moltbot container process
- * 
+ *
  * @param env - Worker environment bindings
  * @returns Environment variables record
  */
@@ -74,10 +74,12 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.IMGBB_API_KEY) envVars.IMGBB_API_KEY = env.IMGBB_API_KEY;
   if (env.GEMINI_API_KEY) envVars.GEMINI_API_KEY = env.GEMINI_API_KEY;
   if (env.GOOGLE_API_KEY) envVars.GOOGLE_API_KEY = env.GOOGLE_API_KEY;
-  if (env.GOOGLE_APPLICATION_CREDENTIALS) envVars.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (env.GOOGLE_APPLICATION_CREDENTIALS)
+    envVars.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
   if (env.GOOGLE_CLOUD_PROJECT) envVars.GOOGLE_CLOUD_PROJECT = env.GOOGLE_CLOUD_PROJECT;
   if (env.GOOGLE_CLOUD_LOCATION) envVars.GOOGLE_CLOUD_LOCATION = env.GOOGLE_CLOUD_LOCATION;
-  if (env.GOOGLE_GENAI_USE_VERTEXAI) envVars.GOOGLE_GENAI_USE_VERTEXAI = env.GOOGLE_GENAI_USE_VERTEXAI;
+  if (env.GOOGLE_GENAI_USE_VERTEXAI)
+    envVars.GOOGLE_GENAI_USE_VERTEXAI = env.GOOGLE_GENAI_USE_VERTEXAI;
   if (env.OBSIDIAN_API_URL) envVars.OBSIDIAN_API_URL = env.OBSIDIAN_API_URL;
   if (env.OBSIDIAN_API_KEY) envVars.OBSIDIAN_API_KEY = env.OBSIDIAN_API_KEY;
   if (env.BW_EMAIL) envVars.BW_EMAIL = env.BW_EMAIL;

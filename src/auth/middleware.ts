@@ -92,14 +92,17 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
         if (type === 'json') {
           return c.json({ error: 'Unauthorized', hint: 'Invalid ADMIN_API_TOKEN' }, 401);
         }
-        return c.html(`
+        return c.html(
+          `
           <html>
             <body>
               <h1>Unauthorized</h1>
               <p>Invalid admin token.</p>
             </body>
           </html>
-        `, 401);
+        `,
+          401,
+        );
       }
     }
 

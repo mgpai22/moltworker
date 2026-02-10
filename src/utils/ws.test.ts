@@ -57,4 +57,3 @@ describe('injectGatewayTokenIntoConnectRequest', () => {
     expect(parsed.params.auth.password).toBeUndefined();
   });
 });
-
