@@ -11,10 +11,10 @@
  * - Configuration via environment secrets
  *
  * Required secrets (set via `wrangler secret put`):
- * - ANTHROPIC_API_KEY: Your Anthropic API key
+ * - MOLTBOT_GATEWAY_TOKEN: Gateway auth token (Worker injects this into wsConnect URLs)
+ * - One AI auth option: ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, OPENAI_API_KEY, or AI_GATEWAY_API_KEY
  *
  * Optional secrets:
- * - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access
  * - TELEGRAM_BOT_TOKEN: Telegram bot token
  * - DISCORD_BOT_TOKEN: Discord bot token
  * - SLACK_BOT_TOKEN + SLACK_APP_TOKEN: Slack tokens
@@ -29,6 +29,7 @@ import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
+import { injectGatewayTokenIntoConnectRequest } from './utils/ws';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -59,6 +60,11 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
 
   if (!env.MOLTBOT_GATEWAY_TOKEN) {
     missing.push('MOLTBOT_GATEWAY_TOKEN');
+  }
+
+  // Required for Control UI WebSocket origin allowlist inside the gateway.
+  if (!env.WORKER_URL) {
+    missing.push('WORKER_URL');
   }
 
   // CF Access vars not required in dev/test mode since auth is skipped
@@ -259,8 +265,8 @@ app.all('*', async (c) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY) {
-      hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
+    if (!c.env.ANTHROPIC_API_KEY && !c.env.ANTHROPIC_OAUTH_TOKEN && !c.env.OPENAI_API_KEY && !c.env.AI_GATEWAY_API_KEY) {
+      hint = 'No AI provider key is set. Run: wrangler secret put ANTHROPIC_API_KEY (or ANTHROPIC_OAUTH_TOKEN)';
     } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
       hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
     }
@@ -285,14 +291,31 @@ app.all('*', async (c) => {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
 
-    // Inject gateway token into WebSocket request if not already present.
-    // CF Access redirects strip query params, so authenticated users lose ?token=.
-    // Since the user already passed CF Access auth, we inject the token server-side.
+    // IMPORTANT: The OpenClaw Control UI sends auth in the `connect` request payload
+    // (`params.auth.token`), not as a `?token=` query parameter on the WebSocket URL.
+    // We still set `?token=` here as a best-effort fallback, but the real fix is
+    // injecting `auth.token` into the `connect` frame below.
+    //
+    // Use a localhost URL so sandbox.wsConnect properly forwards path + query to the container.
+    // Note: Origin mismatch is handled in container config (allowedOrigins), not here.
     let wsRequest = request;
-    if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
-      const tokenUrl = new URL(url.toString());
-      tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
-      wsRequest = new Request(tokenUrl.toString(), request);
+    if (c.env.MOLTBOT_GATEWAY_TOKEN) {
+      const localUrl = new URL(url.pathname + url.search, `http://localhost:${MOLTBOT_PORT}`);
+      // Always override any client-provided token to avoid stale/incorrect values
+      // (e.g., old random tokens persisted in browser state).
+      localUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN.trim());
+      // Create a fresh Request to avoid any wsConnect quirks around cloning upgrade requests.
+      // We preserve headers verbatim (including Upgrade/Sec-WebSocket-*) and only change the URL.
+      wsRequest = new Request(localUrl.toString(), {
+        method: request.method,
+        headers: new Headers(request.headers),
+      });
+      if (debugLogs) {
+        console.log(
+          '[WS] Injected token, wsRequest URL:',
+          localUrl.pathname + redactSensitiveParams(localUrl),
+        );
+      }
     }
 
     // Get WebSocket connection to the container
@@ -325,6 +348,20 @@ app.all('*', async (c) => {
 
     // Relay messages from client to container
     serverWs.addEventListener('message', (event) => {
+      let data: string | ArrayBuffer = event.data;
+
+      // Inject gateway auth token into the connect request so the Control UI
+      // can work without prompting the user for a token.
+      if (typeof data === 'string' && c.env.MOLTBOT_GATEWAY_TOKEN) {
+        const injected = injectGatewayTokenIntoConnectRequest(data, c.env.MOLTBOT_GATEWAY_TOKEN);
+        if (injected !== data) {
+          if (debugLogs) {
+            console.log('[WS] Injected gateway token into connect frame');
+          }
+          data = injected;
+        }
+      }
+
       if (debugLogs) {
         console.log(
           '[WS] Client -> Container:',
@@ -333,7 +370,7 @@ app.all('*', async (c) => {
         );
       }
       if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
+        containerWs.send(data);
       } else if (debugLogs) {
         console.log('[WS] Container not open, readyState:', containerWs.readyState);
       }

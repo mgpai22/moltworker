@@ -369,17 +369,33 @@ if (process.env.OPENCLAW_GATEWAY_TOKEN) {
 // so we bypass it here and rely on CF Access for security.
 config.gateway.controlUi = config.gateway.controlUi || {};
 config.gateway.controlUi.allowInsecureAuth = true;
+// Allow the Worker's origin — the Worker proxies WebSocket connections so the browser's Origin
+// (e.g., https://worker.workers.dev) won't match localhost. CF Access handles auth.
+// OpenClaw does literal string matching (no wildcard support), so we need the explicit origin.
+if (process.env.WORKER_URL) {
+    try {
+        const origin = new URL(process.env.WORKER_URL).origin;
+        config.gateway.controlUi.allowedOrigins = [origin];
+        console.log('Set allowedOrigins to:', origin);
+    } catch (e) {
+        console.log('Failed to parse WORKER_URL, falling back to WORKER_URL as-is:', process.env.WORKER_URL);
+        config.gateway.controlUi.allowedOrigins = [process.env.WORKER_URL];
+    }
+} else {
+    console.log('WARNING: WORKER_URL not set, controlUi origin check may fail');
+    config.gateway.controlUi.allowedOrigins = [];
+}
 
 // Telegram configuration
 if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram = config.channels.telegram || {};
-    config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
+    config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN.trim();
     config.channels.telegram.enabled = true;
-    const telegramDmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    const telegramDmPolicy = (process.env.TELEGRAM_DM_POLICY || 'pairing').trim();
     config.channels.telegram.dmPolicy = telegramDmPolicy;
     if (process.env.TELEGRAM_DM_ALLOW_FROM) {
         // Explicit allowlist: "123,456,789" → ['123', '456', '789']
-        config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
+        config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',').map(s => s.trim());
     } else if (telegramDmPolicy === 'open') {
         // "open" policy requires allowFrom: ["*"]
         config.channels.telegram.allowFrom = ['*'];
@@ -391,9 +407,9 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 // See: https://github.com/moltbot/moltbot/blob/v2026.1.24-1/src/config/zod-schema.providers-core.ts#L147-L155
 if (process.env.DISCORD_BOT_TOKEN) {
     config.channels.discord = config.channels.discord || {};
-    config.channels.discord.token = process.env.DISCORD_BOT_TOKEN;
+    config.channels.discord.token = process.env.DISCORD_BOT_TOKEN.trim();
     config.channels.discord.enabled = true;
-    const discordDmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
+    const discordDmPolicy = (process.env.DISCORD_DM_POLICY || 'pairing').trim();
     config.channels.discord.dm = config.channels.discord.dm || {};
     config.channels.discord.dm.policy = discordDmPolicy;
 
@@ -642,7 +658,6 @@ console.log('Configured summarize skill (uses ANTHROPIC_API_KEY by default)');
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
 EOFNODE
 
 # ============================================================

@@ -50,7 +50,7 @@ publicRoutes.get('/api/status', async (c) => {
   // This destroys the container to force a fresh start with the latest image
   const resetToken = c.req.query('reset');
   if (resetToken) {
-    if (resetToken === c.env.MOLTBOT_GATEWAY_TOKEN) {
+    if (resetToken === c.env.MOLTBOT_GATEWAY_TOKEN?.trim()) {
       console.log('[status] Container reset requested with valid token');
       try {
         await sandbox.destroy();
@@ -70,13 +70,16 @@ publicRoutes.get('/api/status', async (c) => {
     // Check if gateway port is responding by fetching directly (3s timeout).
     try {
       const healthReq = new Request('http://localhost/health');
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 3000)
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('timeout')), 3000);
+      });
+
+      const resp = await Promise.race([sandbox.containerFetch(healthReq, MOLTBOT_PORT), timeout]).finally(
+        () => {
+          if (timeoutId) clearTimeout(timeoutId);
+        },
       );
-      const resp = await Promise.race([
-        sandbox.containerFetch(healthReq, MOLTBOT_PORT),
-        timeout,
-      ]);
       if (resp.status < 500) {
         console.log('[status] Port up! status:', resp.status);
         return c.json({ ok: true, status: 'running' });
@@ -91,6 +94,29 @@ publicRoutes.get('/api/status', async (c) => {
     if (cooldownRemaining > 0) {
       console.log('[status] Cooldown active, remaining:', Math.round(cooldownRemaining / 1000), 's');
       return c.json({ ok: false, status: 'starting' });
+    }
+
+    // Prevent the gateway from ever booting with a random token in production.
+    // In non-dev mode, the Worker injects the token into wsConnect URLs; if the
+    // token is missing, the container generates a random one and the UI becomes
+    // unusable ("Invalid or missing token").
+    const gatewayToken = c.env.MOLTBOT_GATEWAY_TOKEN?.trim();
+    const workerUrl = c.env.WORKER_URL?.trim();
+    const missing: string[] = [];
+    if (!gatewayToken) missing.push('MOLTBOT_GATEWAY_TOKEN');
+    if (!workerUrl) missing.push('WORKER_URL');
+    if (missing.length > 0 && c.env.DEV_MODE !== 'true') {
+      console.error('[status] Refusing to start gateway: missing', missing.join(', '));
+      return c.json(
+        {
+          ok: false,
+          status: 'error',
+          error: 'Configuration error',
+          missing,
+          hint: 'Set these with: npx wrangler secret put <NAME>',
+        },
+        503,
+      );
     }
 
     console.log('[status] Gateway not responding, starting gateway process');
