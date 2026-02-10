@@ -86,6 +86,10 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.GEMINI_API_KEY) envVars.GEMINI_API_KEY = env.GEMINI_API_KEY;
   if (env.OPENROUTER_API_KEY) envVars.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY;
 
+  // Trim all values — Cloudflare secrets often have leading/trailing whitespace
+  for (const key of Object.keys(envVars)) {
+    envVars[key] = envVars[key].trim();
+  }
 
   return envVars;
 }
