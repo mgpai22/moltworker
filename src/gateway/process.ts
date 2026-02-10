@@ -17,7 +17,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
       // Match gateway process (openclaw gateway or legacy clawdbot gateway)
       // Don't match CLI commands like "openclaw devices list"
       const isGatewayProcess =
-        proc.command.includes('start-openclaw.sh') ||
+        proc.command.includes('start-moltbot.sh') ||
         proc.command.includes('openclaw gateway') ||
         // Legacy: match old startup script during transition
         proc.command.includes('start-moltbot.sh') ||
@@ -91,7 +91,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   // Start a new OpenClaw gateway
   console.log('Starting new OpenClaw gateway...');
   const envVars = buildEnvVars(env);
-  const command = '/usr/local/bin/start-openclaw.sh';
+  const command = '/usr/local/bin/start-moltbot.sh';
 
   console.log('Starting process with command:', command);
   console.log('Environment vars being passed:', Object.keys(envVars));

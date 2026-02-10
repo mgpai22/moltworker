@@ -57,7 +57,7 @@ describe('findExistingMoltbotProcess', () => {
   it('returns gateway process when starting via startup script', async () => {
     const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',
-      command: '/usr/local/bin/start-openclaw.sh',
+      command: '/usr/local/bin/start-moltbot.sh',
       status: 'starting',
     });
     const { sandbox, listProcessesMock } = createMockSandbox();
