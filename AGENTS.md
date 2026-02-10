@@ -226,6 +226,21 @@ Moltbot has strict config validation. Common gotchas:
 
 See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
 
+## Documented Solutions
+
+Check `docs/solutions/` for past problem solutions with full root cause analysis:
+
+| Solution | Category |
+|----------|----------|
+| [Upstream Merge Cascading Deploy Failures](docs/solutions/integration-issues/upstream-merge-cascading-deploy-failures.md) | integration-issues |
+| [Sandbox wsConnect Query Param Forwarding](docs/solutions/integration-issues/sandbox-wsconnect-query-param-forwarding.md) | integration-issues |
+
+**Key takeaways across solutions:**
+- Never blindly accept "theirs" during merge conflicts — review each conflict individually
+- Always `.trim()` env var values from Cloudflare secrets
+- After merging upstream, verify script/binary name references match across Dockerfile, process.ts, and startup scripts
+- Test deploy after merge before stacking more changes
+
 ## Common Tasks
 
 ### Adding a New API Endpoint
@@ -253,6 +268,25 @@ npx wrangler secret list
 ```
 
 Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
+
+## Sandbox WebSocket Limitations
+
+**`wsConnect()` does NOT forward URL query parameters.** When proxying WebSocket connections through the Cloudflare Sandbox, you must construct explicit localhost URLs with all needed query params:
+
+```typescript
+// WRONG — query params stripped
+const response = await sandbox.wsConnect(request, MOLTBOT_PORT);
+
+// CORRECT — construct localhost URL with params
+const localUrl = new URL(url.pathname + url.search, `http://localhost:${MOLTBOT_PORT}`);
+localUrl.searchParams.set('token', env.MOLTBOT_GATEWAY_TOKEN);
+const wsRequest = new Request(localUrl.toString(), request);
+const response = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
+```
+
+This differs from `containerFetch()` which does preserve query parameters. See `docs/solutions/integration-issues/sandbox-wsconnect-query-param-forwarding.md` for full investigation.
+
+**Protocol-level token injection does NOT work** — injecting tokens into WebSocket `connect` messages is rejected by the gateway as "unexpected property". Always use URL query params.
 
 ## R2 Storage Notes
 
