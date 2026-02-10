@@ -2,6 +2,41 @@
 
 Guidelines for AI agents working on this codebase.
 
+## Project Summary
+
+Moltworker is a Cloudflare Worker that runs the Moltbot AI assistant inside a Cloudflare Sandbox container. It proxies HTTP/WebSocket to the OpenClaw gateway (port 18789), manages container lifecycle, authenticates via Cloudflare Access, and persists data to R2.
+
+## Quick Reference
+
+- **Entry point:** `src/index.ts` (Hono app with middleware chain + WebSocket proxy + cron)
+- **Container:** `Dockerfile` (sandbox:0.7.0 + Node 22 + openclaw@2026.2.2 + CLI tools)
+- **Startup script:** `start-moltbot.sh` (restores R2 backup, generates config, launches gateway)
+- **Types:** `src/types.ts` (`MoltbotEnv`, `AppEnv`)
+- **Config:** `src/config.ts` (port 18789, 180s timeout, R2 mount path)
+- **Worker config:** `wrangler.jsonc` (standard-4 container, cron every 5min, browser binding)
+
+## Architecture Overview
+
+Worker (Hono) → Sandbox DO → Container (OpenClaw Gateway on :18789) → R2 (persistence)
+
+## Key Directories
+
+- `src/auth/` - CF Access JWT verification, middleware
+- `src/gateway/` - Container process lifecycle, env building, R2 mounting, sync
+- `src/routes/` - public, api (admin), admin-ui, debug, cdp
+- `skills/` - 12 OpenClaw skills (agent-browser, bird, bitwarden, cloudflare-browser, gemini, gemini-stt, github, imgbb, nia, obsidian, summarize, whatsapp)
+- `docs/` - CODEBASE_MAP.md, DEPLOYMENT.md, SKILLS.md, SKILL-ENV-VARS.md
+
+## Important Patterns
+
+- `MOLTBOT_GATEWAY_TOKEN` → mapped to `OPENCLAW_GATEWAY_TOKEN` in container
+- `DEV_MODE=true` skips CF Access auth + device pairing
+- `DEBUG_ROUTES=true` enables `/debug/*` endpoints
+- CLI commands need `--url ws://localhost:18789` and `--token` flag
+- R2 sync uses `rsync -r --no-times` (s3fs doesn't support timestamps)
+- Container reset: `GET /api/status?reset=<gateway_token>`
+- Bump `CACHE_BUST` in Dockerfile when changing skills/startup script
+
 ## Project Overview
 
 This is a Cloudflare Worker that runs [Moltbot](https://molt.bot/) in a Cloudflare Sandbox container. It provides:
@@ -286,7 +321,13 @@ const response = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
 
 This differs from `containerFetch()` which does preserve query parameters. See `docs/solutions/integration-issues/sandbox-wsconnect-query-param-forwarding.md` for full investigation.
 
-**Protocol-level token injection does NOT work** — injecting tokens into WebSocket `connect` messages is rejected by the gateway as "unexpected property". Always use URL query params.
+**Control UI auth is sent in the WebSocket `connect` request payload** (`params.auth.token`).
+
+- URL query params may be stripped by `sandbox.wsConnect()` unless you construct an explicit localhost URL (see solution doc).
+- For the Control UI, preserving `?token=` on the WebSocket URL is not sufficient by itself in modern OpenClaw builds:
+  the UI ultimately sends the token inside the `connect` frame.
+- The worker should inject `params.auth.token` server-side (and may choose to force token-only auth by stripping `params.device`)
+  so users never need to paste tokens into the browser.
 
 ## R2 Storage Notes
 

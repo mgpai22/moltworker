@@ -90,6 +90,24 @@ Anything outside these paths is not persisted across container restarts.
 
 ## How to Force a Container Restart
 
+### Method 0: `/api/status` Reset (Fastest)
+
+The Worker exposes a public reset mechanism on the status endpoint:
+
+```bash
+curl "https://your-worker.workers.dev/api/status?reset=<MOLTBOT_GATEWAY_TOKEN>"
+```
+
+This destroys the Sandbox container. The next request will create a fresh container with the latest image.
+
+Then poll until it reports running:
+
+```bash
+curl "https://your-worker.workers.dev/api/status"
+```
+
+Security note: the reset token is the same value as `MOLTBOT_GATEWAY_TOKEN`. Treat it as sensitive.
+
 ### Method 1: Change CACHE_BUST (Recommended)
 
 Edit `Dockerfile`:

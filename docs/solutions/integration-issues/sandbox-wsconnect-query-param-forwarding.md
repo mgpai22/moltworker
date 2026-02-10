@@ -17,6 +17,11 @@ severity: high
 
 After deploying the moltworker, WebSocket connections to the OpenClaw gateway failed with 1008 "Invalid or missing token", despite the gateway being healthy and HTTP requests working correctly.
 
+Note: This document is specifically about **query parameter forwarding** through `sandbox.wsConnect()`.
+Modern OpenClaw Control UI authentication is primarily driven by the **WebSocket `connect` frame**
+(`params.auth.token`). See:
+- `docs/solutions/integration-issues/control-ui-ws-auth-connect-frame-token-injection.md`
+
 ## Symptoms
 
 1. WebSocket closes immediately with code 1008
@@ -35,6 +40,18 @@ sandbox.wsConnect(request, MOLTBOT_PORT);
 ```
 
 This differs from `containerFetch()` which does preserve query parameters.
+
+## Update (2026-02-10): Control UI Token Is In The `connect` Frame
+
+Newer OpenClaw Control UI builds send gateway auth inside the WebSocket `connect` request payload
+(`params.auth.token`), not by appending `?token=` to the WebSocket URL. The `?token=` query param
+still matters for *browser UX* (the UI reads `location.search` and stores the token), but a Worker
+proxy that wants the UI to "just work" should inject `params.auth.token` server-side when it sees a
+`connect` request.
+
+This means:
+- Fixing `wsConnect()` query param forwarding is still useful for other query-param-dependent flows.
+- But it is not sufficient by itself to solve Control UI auth in modern OpenClaw versions.
 
 ## Solution
 
@@ -55,7 +72,10 @@ const containerResponse = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
 
 ## What Didn't Work
 
-1. **Protocol-level token injection** — Intercepting WebSocket `connect` message and adding `token` field. Gateway rejected with "unexpected property 'token'" — it expects token in URL query, not message body.
+1. **Protocol-level token injection into the wrong field** — Adding `token` as an unexpected property
+   (e.g., at the top-level, or as `params.token`) is rejected by the gateway. If you need the Control UI
+   to authenticate without user input, the correct place is `params.auth.token` inside the `connect` request
+   payload (see the Control UI auth solution doc).
 
 2. **Passing original request URL** — `sandbox.wsConnect(request)` strips query params silently.
 
@@ -69,6 +89,7 @@ const containerResponse = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
 ## Related
 
 - `src/index.ts` — WebSocket proxy implementation
+- `docs/solutions/integration-issues/control-ui-ws-auth-connect-frame-token-injection.md` — Control UI auth behind Worker
 - `src/config.ts` — `MOLTBOT_PORT = 18789`
 - `src/gateway/env.ts` — `MOLTBOT_GATEWAY_TOKEN` → `OPENCLAW_GATEWAY_TOKEN` mapping
 - `docs/solutions/integration-issues/upstream-merge-cascading-deploy-failures.md` — Related WebSocket failures
